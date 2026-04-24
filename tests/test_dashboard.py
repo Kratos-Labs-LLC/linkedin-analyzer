@@ -24,7 +24,8 @@ def cfg(tmp_path: Path, monkeypatch) -> AppConfig:
     ]
     return AppConfig(
         anthropic_api_key=None,
-        slack_webhook_url=None,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
         headless=True,
         creators=creators,
         db_path=tmp_path / "a.db",
@@ -161,3 +162,48 @@ def test_creators_yaml_preserves_structure(tmp_path: Path):
     creators_yaml.remove_creator(path, "a")
     data = creators_yaml.read(path)
     assert not any(e["url"] == "a" for e in data["anchors"])
+
+
+def test_actions_test_alert_not_configured(client):
+    resp = client.post("/actions/test_alert", follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"Telegram not configured" in resp.data
+
+
+def test_actions_test_alert_configured(tmp_path: Path, monkeypatch):
+    from src.config import AppConfig, CreatorConfig
+    from src.dashboard.app import create_app
+
+    cfg = AppConfig(
+        anthropic_api_key=None,
+        telegram_bot_token="fake-token",
+        telegram_chat_id="12345",
+        headless=True,
+        creators=[CreatorConfig("https://linkedin.com/in/a", "A", 1.0)],
+        db_path=tmp_path / "a.db",
+        chrome_profile_dir=tmp_path / "profile",
+        logs_dir=tmp_path / "logs",
+        output_dir=tmp_path / "out",
+    )
+
+    class FakeResp:
+        status_code = 200
+        text = "ok"
+
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr("src.watchdog.requests.post", fake_post)
+    app = create_app(cfg)
+    app.config.update(TESTING=True)
+
+    resp = app.test_client().post("/actions/test_alert", follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"delivered" in resp.data
+    assert captured["url"] == "https://api.telegram.org/botfake-token/sendMessage"
+    assert captured["json"]["chat_id"] == "12345"
+    assert "test ping" in captured["json"]["text"]

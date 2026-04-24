@@ -90,13 +90,19 @@ def _format_alert(alerts: list[Alert], runs_summary: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _post_to_slack(webhook_url: str, message: str) -> None:
+def _post_to_telegram(bot_token: str, chat_id: str, message: str) -> tuple[bool, str]:
+    """POST to Telegram Bot API sendMessage. Returns (ok, detail_for_logs_or_ui)."""
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
-        resp = requests.post(webhook_url, json={"text": message}, timeout=10)
-        if resp.status_code >= 300:
-            log.warning("Slack webhook returned %s: %s", resp.status_code, resp.text[:200])
+        resp = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
     except Exception as e:
-        log.warning("Slack post failed: %s", e)
+        log.warning("Telegram post failed: %s", e)
+        return False, f"request failed: {e}"
+    if resp.status_code >= 300:
+        snippet = resp.text[:200]
+        log.warning("Telegram API returned %s: %s", resp.status_code, snippet)
+        return False, f"HTTP {resp.status_code}: {snippet}"
+    return True, "delivered"
 
 
 def check_and_alert(cfg: AppConfig) -> list[Alert]:
@@ -110,6 +116,17 @@ def check_and_alert(cfg: AppConfig) -> list[Alert]:
 
     message = _format_alert(alerts, recent)
     log.warning("Watchdog alert:\n%s", message)
-    if cfg.slack_webhook_url:
-        _post_to_slack(cfg.slack_webhook_url, message)
+    if cfg.telegram_configured:
+        _post_to_telegram(cfg.telegram_bot_token, cfg.telegram_chat_id, message)
     return alerts
+
+
+def send_test_alert(cfg: AppConfig) -> tuple[bool, str]:
+    """Fire a hand-written ping so the user can verify the bot works end-to-end."""
+    if not cfg.telegram_configured:
+        return False, "Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)."
+    message = (
+        "LinkedIn Analyzer test ping.\n"
+        "If you're reading this, alerts are wired up correctly."
+    )
+    return _post_to_telegram(cfg.telegram_bot_token, cfg.telegram_chat_id, message)

@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 chrome_profile/
 db/
 logs/

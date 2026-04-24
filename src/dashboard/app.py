@@ -116,6 +116,7 @@ def create_app(cfg: AppConfig | None = None) -> Flask:
             current_job=job,
             job_running=actions.is_running(cfg.logs_dir),
             authed=authed,
+            telegram_configured=cfg.telegram_configured,
         )
 
     # --- Creators ----------------------------------------------------------
@@ -330,7 +331,25 @@ def create_app(cfg: AppConfig | None = None) -> Flask:
             state=state,
             running=actions.is_running(cfg.logs_dir),
             log_tail=log_tail,
+            telegram_configured=cfg.telegram_configured,
         )
+
+    @app.route("/actions/test_alert", methods=["POST"])
+    def actions_test_alert():
+        from src import watchdog
+
+        if not cfg.telegram_configured:
+            flash(
+                "Telegram not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.",
+                "error",
+            )
+            return redirect(url_for("actions_page"))
+        ok, detail = watchdog.send_test_alert(cfg)
+        flash(
+            f"Telegram test alert: {detail}",
+            "ok" if ok else "error",
+        )
+        return redirect(url_for("actions_page"))
 
     @app.route("/actions/launch", methods=["POST"])
     def actions_launch():

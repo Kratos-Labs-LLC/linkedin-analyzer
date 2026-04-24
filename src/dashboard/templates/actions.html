@@ -19,6 +19,18 @@
 </div>
 
 <div class="panel">
+  <h2 style="margin-top:0">Telegram</h2>
+  {% if telegram_configured %}
+    <p class="muted">Bot + chat_id configured in <code>.env</code>.</p>
+  {% else %}
+    <p class="muted">Not configured. Set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> in <code>.env</code>, then restart the dashboard. Use <code>python scripts/test_telegram.py --discover</code> to find your chat_id.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('actions_test_alert') }}" class="inline">
+    <button type="submit" {% if not telegram_configured %}disabled title="Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID first"{% endif %}>Send test Telegram alert</button>
+  </form>
+</div>
+
+<div class="panel">
   <h2 style="margin-top:0">Current job</h2>
   {% if state %}
     <p>

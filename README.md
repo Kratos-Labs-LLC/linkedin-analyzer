@@ -17,7 +17,8 @@ linkedin-analyzer/
 │   ├── auth_setup.py          # one-time burner login
 │   ├── run_daily.py           # invoked by launchd
 │   ├── run_analysis.py        # day-31 analysis
-│   └── run_dashboard.py       # local Flask control panel
+│   ├── run_dashboard.py       # local Flask control panel
+│   └── test_telegram.py       # test ping / --discover chat_id
 ├── com.dugg.linkedin-analyzer.plist
 └── src/
     ├── config.py  storage.py  parser.py  collector.py  watchdog.py
@@ -39,7 +40,7 @@ pip install -r requirements.txt
 playwright install chromium
 
 cp .env.example .env
-# edit .env: add ANTHROPIC_API_KEY; optionally SLACK_WEBHOOK_URL
+# edit .env: add ANTHROPIC_API_KEY; optionally TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
 
 # Edit creators.yaml: 25-30 entries meeting the inclusion criteria in the
 # file's header comment. 3-5 anchors, rest standard.
@@ -77,16 +78,37 @@ python scripts/run_daily.py --dry-run   # exercise DB loop without Playwright
 Logs: `logs/YYYY-MM-DD.log` plus `logs/launchd.stdout.log` /
 `logs/launchd.stderr.log`.
 
-## Alerts
+## Alerts (Telegram)
 
-If `SLACK_WEBHOOK_URL` is set in `.env`, the watchdog posts an alert when:
+The watchdog posts alerts to a Telegram bot when:
 
 - Most recent run had status `auth_error`
 - 2+ consecutive non-success runs
 - Last successful run collected < 20 posts (selectors may have drifted)
 - No posts collected in the last 24 hours
 
-With no webhook, alerts log to stdout only.
+With no bot configured, alerts log to stdout only.
+
+**One-time setup:**
+
+1. In Telegram, message `@BotFather` → `/newbot` → follow prompts → copy the
+   HTTP API token it gives you.
+2. Find your bot (the handle @BotFather gave you) and send it any message —
+   this is what makes your chat visible to `getUpdates`.
+3. Put the token in `.env` as `TELEGRAM_BOT_TOKEN=…`.
+4. Discover your chat_id:
+   ```bash
+   python scripts/test_telegram.py --discover
+   ```
+   Copy the number from the output and set `TELEGRAM_CHAT_ID=…` in `.env`.
+5. Verify end-to-end:
+   ```bash
+   python scripts/test_telegram.py
+   ```
+   You should see `OK: delivered` and a message in Telegram.
+
+You can also click **Send test Telegram alert** on the dashboard's Actions
+page — same round-trip, no terminal needed.
 
 ## Session recovery
 
