@@ -11,3 +11,6 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.turbo/

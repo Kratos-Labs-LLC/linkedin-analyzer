@@ -17,16 +17,18 @@ linkedin-analyzer/
 │   ├── auth_setup.py          # one-time burner login
 │   ├── run_daily.py           # invoked by launchd
 │   ├── run_analysis.py        # day-31 analysis
-│   ├── run_dashboard.py       # local Flask control panel
+│   ├── run_dashboard.sh       # wrapper: cd dashboard && npm run dev
 │   └── test_telegram.py       # test ping / --discover chat_id
 ├── com.dugg.linkedin-analyzer.plist
-└── src/
-    ├── config.py  storage.py  parser.py  collector.py  watchdog.py
-    ├── analyzer/
-    │   ├── extractor.py  stats.py  synthesizer.py
-    └── dashboard/
-        ├── app.py  actions.py  creators_yaml.py
-        └── templates/*.html
+├── src/                        # Python collector + analyzer
+│   ├── config.py  storage.py  parser.py  collector.py  watchdog.py
+│   └── analyzer/
+│       ├── extractor.py  stats.py  synthesizer.py
+└── dashboard/                  # Next.js control panel
+    ├── app/                    # routes
+    ├── components/             # UI
+    ├── lib/                    # db, jobs, telegram, yaml, actions
+    └── __tests__/              # Vitest suite
 ```
 
 Runtime dirs `chrome_profile/`, `db/`, `logs/`, `output/` are created on first
@@ -164,36 +166,50 @@ Outputs to `output/`:
 
 ## Dashboard
 
-A local Flask control panel exposes every knob in one place: view collection
-status, edit `creators.yaml`, browse posts, inspect run history, launch
-collection or day-31 analysis jobs, tail their logs, and view the generated
-SKILL.md.
+A local Next.js control panel (in `dashboard/`) exposes every knob in one
+place: view collection status, edit `creators.yaml`, browse posts, inspect
+run history, launch collection or day-31 analysis jobs, tail their logs,
+and view the generated SKILL.md. It reads the same SQLite DB the Python
+collector writes to and spawns the Python scripts as subprocesses for
+mutations.
 
 ```bash
-python scripts/run_dashboard.py          # http://127.0.0.1:8765
-python scripts/run_dashboard.py --port 9000
+# one-time
+bash scripts/run_dashboard.sh      # installs deps if needed, then starts
+# or manually:
+cd dashboard && npm install && npm run dev
 ```
 
-The dashboard has **no authentication** and can edit files, spawn
-subprocesses, and read all collected posts. `run_dashboard.py` refuses to
-bind to anything other than 127.0.0.1 — keep it that way.
+Opens on http://127.0.0.1:3000. Both `npm run dev` and `npm run start` pin
+the bind to 127.0.0.1 — the dashboard is unauthenticated and must stay
+local. Do not expose it.
 
 Routes:
 
-- `/` — overview: totals, readiness gates, recent runs, current job
-- `/creators` — add / remove creators, toggle anchor ↔ standard (writes `creators.yaml`)
+- `/` — overview: totals, 14-day sparkline, readiness gates, recent runs, current job, live log tail
+- `/creators` — add / remove, toggle anchor ↔ standard (writes `creators.yaml` + syncs the DB)
 - `/posts` — filterable post browser, click through for full text + extracted features
-- `/runs` — last 100 run records with error details
+- `/posts/<id>` — single post + feature breakdown
+- `/runs` — last 100 runs with expandable error detail
 - `/analysis` — day-31 readiness, launch form (supply `leadmagnet-post-writer/SKILL.md` path)
 - `/skill` — view generated SKILL.md, stats.json, top/bottom posts
-- `/actions` — launch daily or dry-run, tail current job log, cancel
+- `/actions` — launch daily or dry-run, tail live log, send test Telegram alert, cancel/clear
+
+Prerequisites: Node 20+ (`.venv` must exist for job launching — see setup
+steps above). `better-sqlite3` compiles on first `npm install`.
 
 ## Development
 
 ```bash
-pytest tests/              # storage + parser + stats + dashboard tests
+# Python side
+pytest tests/                         # collector / analyzer / storage
 python scripts/run_daily.py --dry-run
-python scripts/run_dashboard.py
+
+# Dashboard side
+cd dashboard
+npm run dev                           # Next dev server, http://127.0.0.1:3000
+npm run build                         # production build + type check
+npm run test                          # Vitest lib/ tests
 ```
 
 ## Non-goals
