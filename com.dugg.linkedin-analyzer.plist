@@ -11,8 +11,7 @@
     <string>-i</string>
     <string>-t</string>
     <string>3600</string>
-    <string>/usr/bin/env</string>
-    <string>python3</string>
+    <string>REPLACE_WITH_ABSOLUTE_PATH_TO_linkedin-analyzer/.venv/bin/python</string>
     <string>scripts/run_daily.py</string>
   </array>
 

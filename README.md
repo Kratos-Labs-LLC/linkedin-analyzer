@@ -35,7 +35,8 @@ run and gitignored.
 ## One-time setup (Mac)
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate        # activates the venv — prompt now shows (.venv)
 pip install -r requirements.txt
 playwright install chromium
 
@@ -48,6 +49,11 @@ cp .env.example .env
 # Burner auth — headed browser, log in, press Enter when done:
 python scripts/auth_setup.py
 ```
+
+**Important:** every new terminal session needs `source .venv/bin/activate`
+before running `python scripts/...` — otherwise you'll get
+`ModuleNotFoundError: No module named 'requests'` etc. If you prefer, call
+`.venv/bin/python scripts/whatever.py` directly without activating.
 
 `auth_setup.py` writes `chrome_profile/.authed` once complete. The collector
 refuses to run until that sentinel exists.
