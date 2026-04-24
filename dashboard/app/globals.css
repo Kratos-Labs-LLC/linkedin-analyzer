@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0b0f;
+  --color-panel: #13151b;
+  --color-panel-2: #1a1d26;
+  --color-border: #252832;
+  --color-border-strong: #353a48;
+
+  --color-text: #e6e8ee;
+  --color-muted: #8b91a1;
+  --color-dim: #5c626f;
+
+  --color-accent: #5eead4;
+  --color-accent-dim: #3cc4a8;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+  --color-green: #34d399;
+  --color-yellow: #fbbf24;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-panel: 0.5rem;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 20% -10%, rgba(94, 234, 212, 0.04), transparent 60%),
+    radial-gradient(circle at 90% 110%, rgba(251, 191, 36, 0.03), transparent 60%);
+  background-attachment: fixed;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.pill-success { background: rgba(52, 211, 153, 0.12); color: var(--color-green); }
+.pill-partial { background: rgba(251, 191, 36, 0.12); color: var(--color-yellow); }
+.pill-failed, .pill-auth_error { background: rgba(251, 113, 133, 0.12); color: var(--color-rose); }
+.pill-anchor { background: rgba(251, 191, 36, 0.12); color: var(--color-amber); }
+.pill-standard { background: rgba(139, 145, 161, 0.12); color: var(--color-muted); }
+.pill-active { background: rgba(94, 234, 212, 0.12); color: var(--color-accent); }
+.pill-inactive { background: rgba(139, 145, 161, 0.08); color: var(--color-dim); }
+
+.label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }

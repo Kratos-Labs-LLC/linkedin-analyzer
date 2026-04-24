@@ -11,7 +11,8 @@ from src.config import AppConfig, CreatorConfig
 def _cfg(tmp_path: Path) -> AppConfig:
     return AppConfig(
         anthropic_api_key=None,
-        slack_webhook_url=None,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
         headless=True,
         creators=[],
         db_path=tmp_path / "a.db",

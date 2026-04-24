@@ -47,13 +47,18 @@ class CreatorConfig:
 @dataclass
 class AppConfig:
     anthropic_api_key: str | None
-    slack_webhook_url: str | None
+    telegram_bot_token: str | None
+    telegram_chat_id: str | None
     headless: bool
     creators: list[CreatorConfig]
     db_path: Path
     chrome_profile_dir: Path
     logs_dir: Path
     output_dir: Path
+
+    @property
+    def telegram_configured(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
 
 def load_creators(path: Path = DEFAULT_CREATORS_PATH) -> list[CreatorConfig]:
@@ -79,7 +84,8 @@ def load_config(creators_path: Path = DEFAULT_CREATORS_PATH) -> AppConfig:
     load_dotenv(REPO_ROOT / ".env")
     return AppConfig(
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
-        slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL") or None,
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN") or None,
+        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID") or None,
         headless=os.environ.get("HEADLESS", "1") != "0",
         creators=load_creators(creators_path),
         db_path=Path(os.environ.get("ANALYZER_DB", DEFAULT_DB_PATH)),
