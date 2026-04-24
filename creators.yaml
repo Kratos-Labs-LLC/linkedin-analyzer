@@ -1,27 +1,13 @@
-# Curated LinkedIn creators to sample for high-engagement post analysis.
-#
-# Inclusion criteria (all must hold):
-#   - follower count >= 10,000
-#   - posts >= 2x/week
-#   - topic in: AI/automation, B2B sales, agency ops, solo founder/consulting,
-#     marketing strategy, SaaS
-#   - NOT: motivational quotes, reposters, news aggregators
-#   - voice you would plausibly want to approximate (direct, specific, non-corporate)
-#
-# Target: 25-30 creators total. Under 20 = weak rotation; over 35 = noisy synthesis.
-#
-# `anchors` get weight 1.5 (sampled ~17x over 30 days). Reserve for the 3-5
-# voices you most want to model.
-# `standard` get weight 1.0 (sampled ~12x over 30 days).
+# Curated LinkedIn creators. Managed via dashboard or hand-edited.
+# anchors -> weight 1.5; standard -> weight 1.0.
 
 anchors:
-  - url: https://linkedin.com/in/example-anchor-one
-    name: Example Anchor One
-  - url: https://linkedin.com/in/example-anchor-two
-    name: Example Anchor Two
-
+- url: https://linkedin.com/in/example-anchor-one
+  name: Example Anchor One
+- url: https://linkedin.com/in/example-anchor-two
+  name: Example Anchor Two
 standard:
-  - url: https://linkedin.com/in/example-standard-one
-    name: Example Standard One
-  - url: https://linkedin.com/in/example-standard-two
-    name: Example Standard Two
+- url: https://linkedin.com/in/example-standard-one
+  name: Example Standard One
+- url: https://linkedin.com/in/example-standard-two
+  name: Example Standard Two

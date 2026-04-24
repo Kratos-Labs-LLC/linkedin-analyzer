@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Creators{% endblock %}
+{% block content %}
+
+<h1>Creators</h1>
+<p class="muted">Edits are written to <code>{{ yaml_path }}</code> and synced to the DB.</p>
+
+<div class="panel">
+  <h2 style="margin-top:0">Add creator</h2>
+  <form method="post" action="{{ url_for('creators_add') }}">
+    <div class="row">
+      <div>
+        <label>LinkedIn URL</label>
+        <input type="url" name="url" required style="width:320px" placeholder="https://linkedin.com/in/…">
+      </div>
+      <div>
+        <label>Display name</label>
+        <input type="text" name="name" required style="width:200px">
+      </div>
+      <div>
+        <label style="margin-bottom:8px">&nbsp;</label>
+        <label><input type="checkbox" name="anchor"> anchor (weight 1.5)</label>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>URL</th>
+        <th>Tier</th>
+        <th>Posts</th>
+        <th>Followers</th>
+        <th>Last scraped</th>
+        <th>Active</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in creators %}
+        <tr>
+          <td>{{ c.display_name }}</td>
+          <td><a href="{{ c.linkedin_url }}" target="_blank" rel="noopener">{{ c.linkedin_url }}</a></td>
+          <td>
+            {% if c.weight >= 1.5 %}
+              <span class="badge anchor">anchor</span>
+            {% else %}
+              <span class="badge standard">standard</span>
+            {% endif %}
+          </td>
+          <td>{{ c.post_count }}</td>
+          <td>{{ c.current_follower_count or '—' }}</td>
+          <td class="muted">{{ c.last_scraped_at | fmt_ts }}</td>
+          <td>{% if c.active %}<span class="ok">yes</span>{% else %}<span class="muted">no</span>{% endif %}</td>
+          <td>
+            <form class="inline" method="post" action="{{ url_for('creators_toggle_anchor') }}">
+              <input type="hidden" name="url" value="{{ c.linkedin_url }}">
+              <input type="hidden" name="anchor" value="{{ '0' if c.weight >= 1.5 else '1' }}">
+              <button type="submit">{{ '→ standard' if c.weight >= 1.5 else '→ anchor' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('creators_remove') }}" onsubmit="return confirm('Remove {{ c.display_name }}?')">
+              <input type="hidden" name="url" value="{{ c.linkedin_url }}">
+              <button type="submit" class="danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

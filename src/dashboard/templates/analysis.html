@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Analysis{% endblock %}
+{% block content %}
+
+<h1>Day-31 analysis</h1>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>Gate</th><th>Current</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for g in readiness %}
+        <tr>
+          <td>{{ g.label }}</td>
+          <td>{{ g.actual }}</td>
+          <td>
+            {% if g.ok %}<span class="dot ok"></span><span class="ok">ok</span>
+            {% else %}<span class="dot err"></span><span class="err">not met</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Run analysis</h2>
+  <form method="post" action="{{ url_for('analysis_run') }}">
+    <label>Path to existing <code>leadmagnet-post-writer/SKILL.md</code></label>
+    <input type="text" name="leadmagnet_skill_path" required style="width:100%"
+           placeholder="/Users/dugg/.claude/skills/leadmagnet-post-writer/SKILL.md">
+
+    <div class="row" style="margin-top:12px">
+      <label style="margin:0"><input type="checkbox" name="force"> --force (skip readiness gates)</label>
+      <label style="margin:0"><input type="checkbox" name="skip_extract"> --skip-extract</label>
+      <label style="margin:0"><input type="checkbox" name="skip_synth"> --skip-synth</label>
+    </div>
+
+    <div style="margin-top:12px">
+      <button type="submit" class="primary" {% if job_running %}disabled{% endif %}>
+        {% if job_running %}Another job running…{% elif not ready %}Run anyway (use --force){% else %}Run analysis{% endif %}
+      </button>
+    </div>
+  </form>
+
+  <p class="muted" style="margin-top:16px">
+    Requires <code>ANTHROPIC_API_KEY</code> in <code>.env</code>.
+    Feature extraction runs through ~300 posts (≈ 30 min, ~$2).
+    Synthesis is a single Opus call (≈ 1 min, ~$1).
+  </p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Outputs</h2>
+  <ul>
+    <li>stats.json: {% if stats_exists %}<span class="ok">present</span>{% else %}<span class="muted">not generated yet</span>{% endif %}</li>
+    <li>SKILL.md: {% if skill_exists %}<span class="ok">present</span> — <a href="{{ url_for('skill_page') }}">view</a>{% else %}<span class="muted">not generated yet</span>{% endif %}</li>
+  </ul>
+</div>
+
+{% endblock %}

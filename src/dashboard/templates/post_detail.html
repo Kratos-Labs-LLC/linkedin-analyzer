@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Post #{{ post.id }}{% endblock %}
+{% block content %}
+
+<h1>{{ post.creator_name }} — score {{ post.engagement_score | fmt_score }}</h1>
+<p class="muted">
+  reactions {{ post.reactions }} · comments {{ post.comments }} · reshares {{ post.reshares }}
+  · followers {{ post.follower_count_at_collection or '—' }}
+  · posted {{ post.post_date | fmt_ts }}
+  · collected {{ post.collected_at | fmt_ts }}
+  {% if post.is_repost_with_commentary %} · <span class="badge standard">repost + commentary</span>{% endif %}
+</p>
+{% if post.post_url %}
+  <p><a href="{{ post.post_url }}" target="_blank" rel="noopener">Open on LinkedIn</a></p>
+{% endif %}
+
+<h2>Post text</h2>
+<div class="panel">
+  <pre>{{ post.post_text }}</pre>
+</div>
+
+{% if features %}
+  <h2>Extracted features</h2>
+  <div class="panel">
+    <table>
+      <tbody>
+        {% for k, v in features.items() %}
+          <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">No features extracted yet (runs during day-31 analysis).</p>
+{% endif %}
+
+<p><a href="{{ url_for('posts_page') }}">← back to posts</a></p>
+{% endblock %}

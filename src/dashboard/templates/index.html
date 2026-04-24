@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<h1>Collection overview</h1>
+
+<div class="panel">
+  <div class="grid">
+    <div class="stat">
+      <div class="label">Total posts</div>
+      <div class="value">{{ summary.total_posts }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">Active creators</div>
+      <div class="value">{{ n_creators }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">Creators ≥20 posts</div>
+      <div class="value">{{ summary.creators_with_20_posts }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">Avg engagement</div>
+      <div class="value">{{ avg_score | fmt_score }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">First collected</div>
+      <div class="value" style="font-size:13px">{{ summary.first_collected_at | fmt_ts }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">Burner authed</div>
+      <div class="value">
+        {% if authed %}<span class="ok">yes</span>{% else %}<span class="err">no — run auth_setup.py</span>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>Day-31 readiness</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>Gate</th><th>Current</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for g in readiness %}
+        <tr>
+          <td>{{ g.label }}</td>
+          <td>{{ g.actual }}</td>
+          <td>
+            {% if g.ok %}<span class="dot ok"></span><span class="ok">ready</span>
+            {% else %}<span class="dot err"></span><span class="err">not yet</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Current job</h2>
+<div class="panel">
+  {% if current_job %}
+    <div class="row">
+      <span class="dot {{ 'running' if job_running else 'ok' }}"></span>
+      <strong>{{ current_job.kind }}</strong>
+      <span class="muted">pid {{ current_job.pid }}</span>
+      <span class="muted">started {{ current_job.started_at | fmt_ts }}</span>
+      {% if current_job.ended_at %}<span class="muted">ended {{ current_job.ended_at | fmt_ts }} (rc={{ current_job.returncode }})</span>{% endif %}
+      <a class="btn" href="{{ url_for('actions_page') }}">View log</a>
+    </div>
+  {% else %}
+    <span class="muted">No job has been launched from the dashboard yet.</span>
+  {% endif %}
+</div>
+
+<h2>Recent runs</h2>
+<div class="panel">
+  {% if recent_runs %}
+    <table>
+      <thead><tr><th>Date</th><th>Status</th><th>Posts</th><th>Creators</th><th>Ended</th></tr></thead>
+      <tbody>
+        {% for r in recent_runs %}
+          <tr>
+            <td>{{ r.run_date }}</td>
+            <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+            <td>{{ r.posts_collected }}</td>
+            <td>{{ r.creators_scraped }}</td>
+            <td class="muted">{{ r.ended_at | fmt_ts }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <span class="muted">No runs yet. Launch one from the Actions page, or wait for the daily schedule.</span>
+  {% endif %}
+</div>
+
+{% endblock %}

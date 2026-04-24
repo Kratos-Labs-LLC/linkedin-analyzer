@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Actions{% endblock %}
+{% block content %}
+
+<h1>Actions</h1>
+
+<div class="panel">
+  <h2 style="margin-top:0">Launch a job</h2>
+  <p class="muted">Only one job runs at a time. Output streams to a log you can tail below.</p>
+  <form method="post" action="{{ url_for('actions_launch') }}" class="inline">
+    <input type="hidden" name="kind" value="daily">
+    <button type="submit" class="primary" {% if running %}disabled{% endif %}>Run daily collection</button>
+  </form>
+  <form method="post" action="{{ url_for('actions_launch') }}" class="inline">
+    <input type="hidden" name="kind" value="dry_run">
+    <button type="submit" {% if running %}disabled{% endif %}>Dry-run (no Playwright)</button>
+  </form>
+  <a class="btn" href="{{ url_for('analysis_page') }}">Analysis &rarr;</a>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Current job</h2>
+  {% if state %}
+    <p>
+      <span class="dot {{ 'running' if running else 'ok' }}"></span>
+      <strong>{{ state.kind }}</strong>
+      <span class="muted">pid {{ state.pid }}</span>
+      <span class="muted">started {{ state.started_at | fmt_ts }}</span>
+      {% if state.ended_at %}<span class="muted">ended {{ state.ended_at | fmt_ts }} · rc={{ state.returncode }}</span>{% endif %}
+    </p>
+    <p class="muted">log: <code>{{ state.log_path }}</code></p>
+    <div class="row">
+      {% if running %}
+        <form method="post" action="{{ url_for('actions_cancel') }}" class="inline">
+          <button type="submit" class="danger">Cancel (SIGTERM)</button>
+        </form>
+      {% endif %}
+      <form method="post" action="{{ url_for('actions_clear') }}" class="inline">
+        <button type="submit">Clear state</button>
+      </form>
+      <a class="btn" href="{{ url_for('actions_page') }}">Refresh</a>
+    </div>
+  {% else %}
+    <p class="muted">No job launched from the dashboard yet.</p>
+  {% endif %}
+</div>
+
+{% if log_tail %}
+  <h2>Log tail</h2>
+  <div class="panel">
+    <pre>{{ log_tail }}</pre>
+  </div>
+{% endif %}
+
+{% endblock %}

@@ -16,12 +16,16 @@ linkedin-analyzer/
 ├── scripts/
 │   ├── auth_setup.py          # one-time burner login
 │   ├── run_daily.py           # invoked by launchd
-│   └── run_analysis.py        # day-31 analysis
+│   ├── run_analysis.py        # day-31 analysis
+│   └── run_dashboard.py       # local Flask control panel
 ├── com.dugg.linkedin-analyzer.plist
 └── src/
     ├── config.py  storage.py  parser.py  collector.py  watchdog.py
-    └── analyzer/
-        ├── extractor.py  stats.py  synthesizer.py
+    ├── analyzer/
+    │   ├── extractor.py  stats.py  synthesizer.py
+    └── dashboard/
+        ├── app.py  actions.py  creators_yaml.py
+        └── templates/*.html
 ```
 
 Runtime dirs `chrome_profile/`, `db/`, `logs/`, `output/` are created on first
@@ -130,11 +134,38 @@ Outputs to `output/`:
   outdated — 4.5 is the current Sonnet, similar price, better quality).
 - Synthesizer uses `claude-opus-4-7` per spec.
 
+## Dashboard
+
+A local Flask control panel exposes every knob in one place: view collection
+status, edit `creators.yaml`, browse posts, inspect run history, launch
+collection or day-31 analysis jobs, tail their logs, and view the generated
+SKILL.md.
+
+```bash
+python scripts/run_dashboard.py          # http://127.0.0.1:8765
+python scripts/run_dashboard.py --port 9000
+```
+
+The dashboard has **no authentication** and can edit files, spawn
+subprocesses, and read all collected posts. `run_dashboard.py` refuses to
+bind to anything other than 127.0.0.1 — keep it that way.
+
+Routes:
+
+- `/` — overview: totals, readiness gates, recent runs, current job
+- `/creators` — add / remove creators, toggle anchor ↔ standard (writes `creators.yaml`)
+- `/posts` — filterable post browser, click through for full text + extracted features
+- `/runs` — last 100 run records with error details
+- `/analysis` — day-31 readiness, launch form (supply `leadmagnet-post-writer/SKILL.md` path)
+- `/skill` — view generated SKILL.md, stats.json, top/bottom posts
+- `/actions` — launch daily or dry-run, tail current job log, cancel
+
 ## Development
 
 ```bash
-pytest tests/              # storage + parser + stats unit tests
+pytest tests/              # storage + parser + stats + dashboard tests
 python scripts/run_daily.py --dry-run
+python scripts/run_dashboard.py
 ```
 
 ## Non-goals
