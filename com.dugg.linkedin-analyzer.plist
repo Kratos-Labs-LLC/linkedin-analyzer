@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dugg.linkedin-analyzer</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>-t</string>
+    <string>3600</string>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>scripts/run_daily.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_WITH_ABSOLUTE_PATH_TO_linkedin-analyzer</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_WITH_ABSOLUTE_PATH_TO_linkedin-analyzer/logs/launchd.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>REPLACE_WITH_ABSOLUTE_PATH_TO_linkedin-analyzer/logs/launchd.stderr.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>ThrottleInterval</key>
+  <integer>1800</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HEADLESS</key>
+    <string>1</string>
+  </dict>
+</dict>
+</plist>

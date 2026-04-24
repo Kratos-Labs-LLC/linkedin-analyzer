@@ -1,0 +1,218 @@
+"""Correlation analysis on extracted post_features. Pure Python — no NumPy."""
+from __future__ import annotations
+
+import json
+import logging
+import math
+from collections import defaultdict
+from pathlib import Path
+
+from src import storage
+from src.config import AppConfig
+
+log = logging.getLogger(__name__)
+
+# Keys we know are categorical vs numeric in the feature schema.
+CATEGORICAL_KEYS = {
+    "hook_type",
+    "paragraph_style",
+    "list_style",
+    "cta_type",
+    "emotional_register",
+    "narrative_arc",
+    "opens_with_pronoun",
+    "ends_with",
+    "topic_category",
+}
+NUMERIC_KEYS = {
+    "opening_word_count",
+    "total_word_count",
+    "line_break_count",
+    "emoji_count",
+    "specificity_score",
+    "controversy_score",
+}
+BOOLEAN_KEYS = {"uses_list", "uses_emojis"}
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    n = len(xs)
+    if n < 3:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+    dy = math.sqrt(sum((y - my) ** 2 for y in ys))
+    if dx == 0 or dy == 0:
+        return None
+    return num / (dx * dy)
+
+
+def _quartile(sorted_vals: list[float], q: float) -> float | None:
+    if not sorted_vals:
+        return None
+    idx = int(q * (len(sorted_vals) - 1))
+    return sorted_vals[idx]
+
+
+def compute_stats(cfg: AppConfig) -> dict:
+    with storage.connect(cfg.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.engagement_score, pf.features_json
+            FROM posts p JOIN post_features pf ON pf.post_id = p.id
+            WHERE p.engagement_score IS NOT NULL
+            """
+        ).fetchall()
+
+    if not rows:
+        log.warning("No rows with features + engagement scores.")
+        return {"n_posts_analyzed": 0}
+
+    parsed: list[tuple[float, dict]] = []
+    for r in rows:
+        try:
+            feats = json.loads(r["features_json"])
+        except json.JSONDecodeError:
+            continue
+        parsed.append((r["engagement_score"], feats))
+
+    parsed.sort(key=lambda t: t[0], reverse=True)
+    n = len(parsed)
+    cutoff = max(1, int(n * 0.5))
+    top_q = parsed[:cutoff]
+    bottom_q = parsed[cutoff:]
+
+    # Categorical features
+    categorical: dict[str, dict] = {}
+    for key in CATEGORICAL_KEYS | BOOLEAN_KEYS:
+        buckets: dict[str, list[float]] = defaultdict(list)
+        for score, feats in parsed:
+            v = feats.get(key)
+            if v is None:
+                continue
+            buckets[str(v)].append(score)
+        if not buckets:
+            continue
+        per_cat = {
+            val: {"n": len(scores), "mean_engagement": sum(scores) / len(scores)}
+            for val, scores in buckets.items()
+        }
+        ranked = sorted(per_cat.items(), key=lambda kv: kv[1]["mean_engagement"], reverse=True)
+        for rank, (val, _) in enumerate(ranked, start=1):
+            per_cat[val]["rank"] = rank
+        categorical[key] = per_cat
+
+    # Numeric features
+    numeric: dict[str, dict] = {}
+    for key in NUMERIC_KEYS:
+        xs: list[float] = []
+        ys: list[float] = []
+        top_vals: list[float] = []
+        bot_vals: list[float] = []
+        for score, feats in parsed:
+            v = feats.get(key)
+            if not isinstance(v, (int, float)):
+                continue
+            xs.append(float(v))
+            ys.append(score)
+        for score, feats in top_q:
+            v = feats.get(key)
+            if isinstance(v, (int, float)):
+                top_vals.append(float(v))
+        for score, feats in bottom_q:
+            v = feats.get(key)
+            if isinstance(v, (int, float)):
+                bot_vals.append(float(v))
+        if not xs:
+            continue
+        numeric[key] = {
+            "correlation": _pearson(xs, ys),
+            "top_quartile_mean": sum(top_vals) / len(top_vals) if top_vals else None,
+            "bottom_quartile_mean": sum(bot_vals) / len(bot_vals) if bot_vals else None,
+            "n": len(xs),
+        }
+
+    # Array features (proof_elements) — count frequency in top vs bottom
+    proof_top: dict[str, int] = defaultdict(int)
+    proof_bot: dict[str, int] = defaultdict(int)
+    for score, feats in top_q:
+        vals = feats.get("proof_elements") or []
+        if isinstance(vals, list):
+            for v in vals:
+                proof_top[str(v)] += 1
+    for score, feats in bottom_q:
+        vals = feats.get("proof_elements") or []
+        if isinstance(vals, list):
+            for v in vals:
+                proof_bot[str(v)] += 1
+
+    return {
+        "n_posts_analyzed": n,
+        "top_quartile_n": len(top_q),
+        "bottom_quartile_n": len(bottom_q),
+        "categorical_features": categorical,
+        "numeric_features": numeric,
+        "proof_elements_frequency": {
+            "top_quartile": dict(proof_top),
+            "bottom_quartile": dict(proof_bot),
+        },
+    }
+
+
+def write_stats_json(stats: dict, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "stats.json"
+    path.write_text(json.dumps(stats, indent=2))
+    return path
+
+
+def write_top_bottom_markdown(cfg: AppConfig, output_dir: Path, limit: int = 50) -> tuple[Path, Path]:
+    """Emits top_posts.md and bottom_posts.md — up to `limit` posts each."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with storage.connect(cfg.db_path) as conn:
+        top = conn.execute(
+            """
+            SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+            FROM posts p JOIN creators c ON c.id = p.creator_id
+            WHERE p.engagement_score IS NOT NULL
+            ORDER BY p.engagement_score DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        bottom = conn.execute(
+            """
+            SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+            FROM posts p JOIN creators c ON c.id = p.creator_id
+            WHERE p.engagement_score IS NOT NULL
+            ORDER BY p.engagement_score ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    def render(rows, title: str) -> str:
+        out = [f"# {title}", ""]
+        for r in rows:
+            out.append(
+                f"## {r['creator_name']} — score {r['engagement_score']:.4f}"
+            )
+            out.append(
+                f"reactions={r['reactions']} comments={r['comments']} reshares={r['reshares']} "
+                f"followers={r['follower_count_at_collection']}"
+            )
+            out.append("")
+            out.append(r["post_text"])
+            out.append("")
+            out.append("---")
+            out.append("")
+        return "\n".join(out)
+
+    top_path = output_dir / "top_posts.md"
+    bot_path = output_dir / "bottom_posts.md"
+    top_path.write_text(render(top, "Top posts by normalized engagement"))
+    bot_path.write_text(render(bottom, "Bottom posts by normalized engagement"))
+    return top_path, bot_path
