@@ -17,7 +17,7 @@ export type JobState = {
   started_at: string;
   ended_at: string | null;
   returncode: number | null;
-  args: string[] | null;
+  args: string[];
 };
 
 const STATE_FILE = 'current_job.json';
@@ -93,7 +93,7 @@ export function launch(kind: JobKind, extraArgs: string[] = []): JobState {
   }
 
   fs.mkdirSync(LOGS_DIR, { recursive: true });
-  const ts = new Date().toISOString().replace(/[-:.]/g, '').replace(/T/, 'T');
+  const ts = new Date().toISOString().replace(/[-:.]/g, '');
   const logPath = path.join(LOGS_DIR, `web-${kind}-${ts}.log`);
 
   const { argv } = scriptFor(kind);

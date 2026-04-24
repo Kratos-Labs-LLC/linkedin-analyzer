@@ -10,7 +10,7 @@ import {
   setAnchor as yamlSetAnchor,
 } from './creators-yaml';
 import { syncCreatorsFromYaml } from './db';
-import { cancel, clearState, launch, type JobKind } from './jobs';
+import { cancel, clearState, JOB_KINDS, launch, type JobKind } from './jobs';
 import { sendTestAlert } from './telegram';
 
 function resyncCreators() {
@@ -56,7 +56,11 @@ export async function toggleAnchorAction(formData: FormData) {
 }
 
 export async function launchJobAction(formData: FormData) {
-  const kind = String(formData.get('kind') ?? '') as JobKind;
+  const raw = String(formData.get('kind') ?? '');
+  if (!(JOB_KINDS as readonly string[]).includes(raw)) {
+    return { ok: false, message: `Unknown job kind: ${raw || '(empty)'}` };
+  }
+  const kind = raw as JobKind;
   try {
     launch(kind);
   } catch (e) {

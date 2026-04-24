@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -26,6 +27,10 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [host, setHost] = useState<string | null>(null);
+  useEffect(() => {
+    setHost(window.location.host);
+  }, []);
   return (
     <aside className="w-56 shrink-0 border-r border-border bg-panel/60 backdrop-blur">
       <div className="sticky top-0 flex flex-col h-screen">
@@ -48,14 +53,15 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                  'relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
                   'hover:bg-panel-2 hover:text-text',
                   active ? 'bg-panel-2 text-text' : 'text-muted',
                 )}
               >
                 <span
+                  aria-hidden
                   className={cn(
-                    'absolute -ml-3 h-4 w-[2px] rounded-r bg-accent transition-opacity',
+                    'absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[2px] rounded-r bg-accent transition-opacity',
                     active ? 'opacity-100' : 'opacity-0',
                   )}
                 />
@@ -66,7 +72,7 @@ export function Sidebar() {
           })}
         </nav>
         <div className="p-4 text-[11px] text-dim">
-          <div className="tabular">127.0.0.1:3000</div>
+          <div className="tabular">{host ?? '—'}</div>
           <div className="mt-1">local-only · unauthenticated</div>
         </div>
       </div>

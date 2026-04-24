@@ -12,11 +12,13 @@ export function LogTail({
   poll: boolean;
 }) {
   const [content, setContent] = useState(initial);
+  const [running, setRunning] = useState(poll);
   const preRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
-    if (!poll) return;
+    if (!running) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function tick() {
       try {
@@ -25,19 +27,26 @@ export function LogTail({
         });
         if (!res.ok) return;
         const text = await res.text();
-        if (!cancelled) setContent(text);
+        const stillRunning = res.headers.get('x-job-running') === '1';
+        if (cancelled) return;
+        setContent(text);
+        if (!stillRunning) {
+          setRunning(false);
+          return;
+        }
+        timer = setTimeout(tick, 2000);
       } catch {
-        /* ignore */
+        // network blip — retry next interval
+        if (!cancelled) timer = setTimeout(tick, 2000);
       }
     }
 
-    const id = setInterval(tick, 2000);
     void tick();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timer) clearTimeout(timer);
     };
-  }, [logPath, poll]);
+  }, [logPath, running]);
 
   useEffect(() => {
     if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
