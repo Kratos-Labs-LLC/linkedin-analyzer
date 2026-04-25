@@ -122,6 +122,7 @@ async def _scrape_creator(page, creator: CreatorConfig, creator_id: int, conn) -
             follower_count_at_collection=follower_count,
             post_date=cand.post_date,
             is_repost_with_commentary=cand.is_repost and cand.qualifies_as_original,
+            raw_html=cand.raw_html,
         ):
             inserted += 1
 

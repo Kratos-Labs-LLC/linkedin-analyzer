@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS posts (
   engagement_score REAL,
   post_date TEXT,
   collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  is_repost_with_commentary BOOLEAN DEFAULT 0
+  is_repost_with_commentary BOOLEAN DEFAULT 0,
+  raw_html TEXT
 );
 
 CREATE TABLE IF NOT EXISTS post_features (
@@ -65,6 +66,17 @@ def init_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+# Idempotent column adds for older DBs that pre-date a schema change.
+# CREATE TABLE IF NOT EXISTS leaves existing tables untouched, so new columns
+# need an explicit ALTER. Each migration wraps in a column-presence check so
+# re-running init_db is a no-op.
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}
+    if "raw_html" not in cols:
+        conn.execute("ALTER TABLE posts ADD COLUMN raw_html TEXT")
 
 
 @contextmanager
@@ -186,15 +198,22 @@ def insert_post(
     follower_count_at_collection: int | None,
     post_date: str | None,
     is_repost_with_commentary: bool = False,
+    raw_html: str | None = None,
 ) -> bool:
-    """Insert a post; returns True if inserted, False if duplicate."""
+    """Insert a post; returns True if inserted, False if duplicate.
+
+    `raw_html` is the post container's inner HTML at scrape time. We persist
+    it so the feature schema can be extended later without re-scraping —
+    re-running the extractor against stored HTML is fast and free.
+    """
     score = compute_engagement_score(reactions, comments, reshares, follower_count_at_collection)
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO posts
           (post_urn, creator_id, post_url, post_text, reactions, comments, reshares,
-           follower_count_at_collection, engagement_score, post_date, is_repost_with_commentary)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           follower_count_at_collection, engagement_score, post_date,
+           is_repost_with_commentary, raw_html)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             post_urn,
@@ -208,6 +227,7 @@ def insert_post(
             score,
             post_date,
             1 if is_repost_with_commentary else 0,
+            raw_html,
         ),
     )
     return cur.rowcount > 0
