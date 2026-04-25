@@ -107,3 +107,55 @@ def test_metrics_reports_output_artifacts(tmp_path: Path):
     assert m["outputs"]["stats_json"]["present"] is True
     assert m["outputs"]["writer_skill_md"]["present"] is True
     assert m["outputs"]["profile_skill_md"]["present"] is False
+
+
+# --- Intelligence section ---------------------------------------------
+
+
+def test_intelligence_section_empty_when_no_briefs(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    storage.init_db(cfg.db_path)
+    m = metrics.compute_metrics(cfg)
+    intel = m["intelligence"]
+    assert intel["n_creators_with_doc"] == 0
+    assert intel["total_md_bytes"] == 0
+    assert intel["total_pack_bytes"] == 0
+    assert intel["n_stub_docs"] == 0
+    assert intel["last_intelligence_run_at"] is None
+
+
+def test_intelligence_section_counts_briefs_and_packs(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    storage.init_db(cfg.db_path)
+    intel_dir = cfg.output_dir / "intelligence"
+    intel_dir.mkdir(parents=True)
+    (intel_dir / "alice-1.md").write_text("## TL;DR\nbody")
+    (intel_dir / "alice-1.pack.json").write_text('{"creator": {"id": 1}}')
+    (intel_dir / "bob-2.md").write_text("## TL;DR\nbody")
+    (intel_dir / "bob-2.pack.json").write_text('{"creator": {"id": 2}}')
+
+    m = metrics.compute_metrics(cfg)
+    intel = m["intelligence"]
+    assert intel["n_creators_with_doc"] == 2
+    assert intel["total_md_bytes"] > 0
+    assert intel["total_pack_bytes"] > 0
+    assert intel["n_stub_docs"] == 0
+    assert intel["last_intelligence_run_at"] is not None
+
+
+def test_intelligence_section_flags_stub_docs(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    storage.init_db(cfg.db_path)
+    intel_dir = cfg.output_dir / "intelligence"
+    intel_dir.mkdir(parents=True)
+    (intel_dir / "broken-1.md").write_text(
+        "# Intelligence brief: Broken (auto-stub)\n\nSynthesizer fallback."
+    )
+    (intel_dir / "good-2.md").write_text(
+        "## TL;DR\n\nReal brief content with actual analysis."
+    )
+
+    m = metrics.compute_metrics(cfg)
+    intel = m["intelligence"]
+    assert intel["n_creators_with_doc"] == 2
+    assert intel["n_stub_docs"] == 1

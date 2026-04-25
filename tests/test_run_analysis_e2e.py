@@ -65,6 +65,8 @@ def _classify(kwargs: dict) -> str:
         return "validator-judge"
     if "auditing a single LinkedIn profile" in sys_text:
         return "audit-opus"
+    if "competitive-intelligence brief" in sys_text:
+        return "intelligence-synth"
     if "linkedin-profile-optimizer" in sys_text:
         if "draft" in user_msg.lower() and "<draft>" in user_msg:
             return "profile-synth-revise"
@@ -154,6 +156,20 @@ def _make_canned_response(tag: str) -> _FakeResp:
         return _FakeResp(json.dumps({"winner": "A", "reasoning": "ok"}))
     if tag == "audit-opus":
         return _FakeResp("# Verdict\n\nMid pull.\n\n# Top 3 fixes\n\n1. x\n2. y\n3. z")
+    if tag == "intelligence-synth":
+        body = "Lorem ipsum. " * 80
+        sections = [
+            "## TL;DR",
+            "## Identity & positioning",
+            "## What they post",
+            "## What works for them",
+            "## What doesn't work",
+            "## Why followers grow",
+            "## Profile-post coherence",
+            "## Replicable plays",
+            "## Appendix",
+        ]
+        return _FakeResp("\n\n".join(f"{h}\n\n{body}" for h in sections))
     return _FakeResp("UNEXPECTED")
 
 
@@ -224,6 +240,43 @@ def _seed_realistic_db(cfg: AppConfig) -> None:
                     follower_count_at_collection=1100,
                     post_date=f"2026-04-{2 + pi:02d}T00:00:00Z",
                 )
+                # Pre-seed post_features for every post so the per-creator
+                # intelligence step has enough featured posts (>=5/creator)
+                # without depending on the live extractor running on the full
+                # corpus (it only processes top+bottom quartile by default).
+                pid = conn.execute(
+                    "SELECT id FROM posts WHERE post_urn = ?",
+                    (f"urn:li:activity:{ci}-{pi}",),
+                ).fetchone()["id"]
+                conn.execute(
+                    "INSERT OR REPLACE INTO post_features (post_id, features_json) "
+                    "VALUES (?, ?)",
+                    (
+                        pid,
+                        json.dumps(
+                            {
+                                "hook_type": "bold_claim" if pi % 2 == 0 else "story",
+                                "paragraph_style": "short_chunks",
+                                "list_style": "none",
+                                "uses_list": False,
+                                "uses_emojis": False,
+                                "cta_type": "question_prompt",
+                                "emotional_register": "practical",
+                                "narrative_arc": "none",
+                                "opens_with_pronoun": "i",
+                                "ends_with": "statement",
+                                "topic_category": "agency_ops",
+                                "opening_word_count": 8,
+                                "total_word_count": 80,
+                                "line_break_count": 2,
+                                "emoji_count": 0,
+                                "specificity_score": 5,
+                                "controversy_score": 3,
+                                "proof_elements": ["none"],
+                            }
+                        ),
+                    ),
+                )
 
 
 # --- The test -----------------------------------------------------------
@@ -270,7 +323,8 @@ def test_run_analysis_pipeline_orders_steps_correctly(cfg, monkeypatch):
          patch("src.analyzer.extractor.Anthropic", factory), \
          patch("src.analyzer.profile_extractor.Anthropic", factory), \
          patch("src.analyzer.synthesizer.Anthropic", factory), \
-         patch("src.analyzer.profile_synthesizer.Anthropic", factory):
+         patch("src.analyzer.profile_synthesizer.Anthropic", factory), \
+         patch("src.analyzer.intelligence_runner.Anthropic", factory):
         # Import lazily so the patch is in place before the script's main runs.
         import importlib
 
@@ -335,6 +389,19 @@ def test_run_analysis_pipeline_orders_steps_correctly(cfg, monkeypatch):
     ]
     for p in expected:
         assert p.exists(), f"expected output missing: {p}"
+
+    # Per-creator intelligence briefs: one .md + one .pack.json per
+    # eligible creator. The seed has 6 creators with 6 posts each, all
+    # featured -> all 6 are eligible.
+    intel_dir = out / "intelligence"
+    assert intel_dir.exists(), "intelligence/ directory missing"
+    md_files = sorted(intel_dir.glob("*.md"))
+    pack_files = sorted(intel_dir.glob("*.pack.json"))
+    assert len(md_files) == 6, f"expected 6 intelligence .md files, got {len(md_files)}"
+    assert len(pack_files) == 6, f"expected 6 .pack.json files, got {len(pack_files)}"
+    # Stub guard: no stub doc should appear in the happy path.
+    for p in md_files:
+        assert "auto-stub" not in p.read_text()
 
     # stats.json includes both axes
     stats = json.loads((out / "stats.json").read_text())

@@ -15,6 +15,7 @@ from src import storage  # noqa: E402
 from src.analyzer import (  # noqa: E402
     extractor,
     growth,
+    intelligence_runner,
     metrics,
     profile_audit,
     profile_extractor,
@@ -99,15 +100,49 @@ def main() -> int:
         action="store_true",
         help="Skip post extract/stats/synth/validate; only run the profile axis.",
     )
+    parser.add_argument(
+        "--skip-intelligence",
+        action="store_true",
+        help="Skip per-creator competitive-intelligence brief generation.",
+    )
+    parser.add_argument(
+        "--intelligence-only",
+        action="store_true",
+        help=(
+            "Skip every other step; only generate per-creator intelligence "
+            "briefs from existing post_features + profile_features."
+        ),
+    )
+    parser.add_argument(
+        "--intelligence-creator",
+        type=str,
+        default=None,
+        help=(
+            "If set, only generate the intelligence brief for the given "
+            "creator linkedin_url. Other creators are skipped."
+        ),
+    )
     args = parser.parse_args()
 
     cfg = load_config()
     storage.init_db(cfg.db_path)
 
-    # --profile-only and --validate-only short-circuit the post pipeline.
-    run_post_pipeline = not (args.validate_only or args.profile_only)
-    run_profile_pipeline = not args.skip_profile and not args.validate_only
-    run_validation = not args.skip_validate and not args.profile_only
+    # --profile-only, --validate-only, --intelligence-only short-circuit
+    # different pieces of the pipeline. Compose the toggles once here so
+    # the body just reads the booleans.
+    short_circuited = args.validate_only or args.profile_only or args.intelligence_only
+    run_post_pipeline = not short_circuited
+    run_profile_pipeline = (
+        not args.skip_profile
+        and not args.validate_only
+        and not args.intelligence_only
+    )
+    run_validation = (
+        not args.skip_validate
+        and not args.profile_only
+        and not args.intelligence_only
+    )
+    run_intelligence = not args.skip_intelligence and not args.validate_only
 
     if run_post_pipeline:
         reasons = _check_readiness(cfg)
@@ -182,6 +217,36 @@ def main() -> int:
         audit_path = profile_audit.audit(cfg)
         if audit_path is not None:
             log.info("Wrote %s.", audit_path)
+
+    # On --intelligence-only, run the prerequisite computations the
+    # intelligence pack depends on, but only when their inputs are stale
+    # or missing. Two prereqs, checked independently:
+    #   - posts.growth_7d (from growth.recompute_post_growth) — feeds the
+    #     "Why followers grow" section. Cheap, no LLM call.
+    #   - profile_features (from profile_extractor) — feeds the profile
+    #     coherence section + the cohort baseline. Sonnet calls, ~$0.30.
+    # Each runs only when its own output is empty, so warm DBs stay fast.
+    if args.intelligence_only:
+        with storage.connect(cfg.db_path) as conn:
+            n_features = conn.execute(
+                "SELECT COUNT(*) AS n FROM profile_features"
+            ).fetchone()["n"]
+            n_growth = conn.execute(
+                "SELECT COUNT(*) AS n FROM posts WHERE growth_7d IS NOT NULL"
+            ).fetchone()["n"]
+        if n_growth == 0:
+            log.info("intelligence-only prereq: backfill posts.growth_7d")
+            growth.recompute_post_growth(cfg)
+        if n_features == 0:
+            log.info("intelligence-only prereq: extract profile features (~$0.30)")
+            profile_extractor.extract_profile_features(cfg)
+
+    if run_intelligence:
+        log.info("Per-creator intelligence: building briefs (Opus, ~$0.20/creator)")
+        intel_counts = intelligence_runner.run_intelligence(
+            cfg, target_creator_url=args.intelligence_creator
+        )
+        log.info("  intelligence: %s", intel_counts)
 
     if run_validation:
         new_skill_path = cfg.output_dir / "linkedin-high-engagement-writer" / "SKILL.md"

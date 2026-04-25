@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 
-import { DB_PATH, REPO_ROOT } from './paths';
+import { DB_PATH, OUTPUT_DIR, REPO_ROOT } from './paths';
 
 // Single source of truth for the schema lives at db/schema.sql, loaded by
 // both Python and TS at module-init time. Matching the test ensures neither
@@ -404,6 +404,62 @@ export function computeGrowthRatePerWeek(snapshots: ProfileSnapshotRow[]): numbe
   }
   if (den === 0) return null;
   return (num / den) * 7 * 24 * 3600;
+}
+
+// --- Intelligence briefs --------------------------------------------------
+
+/**
+ * Stable file-safe slug for a creator. Must match
+ * src/analyzer/intelligence_runner.py:creator_slug exactly — both sides
+ * resolve the same `output/intelligence/<slug>.md` path.
+ */
+export function creatorSlug(args: {
+  display_name: string | null;
+  id: number;
+}): string {
+  const base = (args.display_name ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (!base) return `creator-${args.id}`;
+  return `${base}-${args.id}`;
+}
+
+export type IntelligenceArtifacts = {
+  markdown: string | null;
+  packJson: unknown | null;
+};
+
+/**
+ * Read both the markdown brief and the pack.json sidecar. Returns nulls
+ * for whichever pieces are missing — the page renders the brief when
+ * present and a placeholder when not.
+ */
+export function readIntelligenceArtifacts(creator: {
+  id: number;
+  display_name: string | null;
+}): IntelligenceArtifacts {
+  const slug = creatorSlug(creator);
+  const mdPath = path.join(OUTPUT_DIR, 'intelligence', `${slug}.md`);
+  const jsonPath = path.join(OUTPUT_DIR, 'intelligence', `${slug}.pack.json`);
+
+  let markdown: string | null = null;
+  try {
+    markdown = fs.readFileSync(mdPath, 'utf8');
+  } catch {
+    markdown = null;
+  }
+
+  let packJson: unknown = null;
+  try {
+    const raw = fs.readFileSync(jsonPath, 'utf8');
+    packJson = JSON.parse(raw);
+  } catch {
+    packJson = null;
+  }
+
+  return { markdown, packJson };
 }
 
 export function topGrowthCreators(limit = 5): Array<{
