@@ -9,8 +9,16 @@ import {
   type Verdict,
 } from '@/lib/anthropic';
 import { NEW_SKILL_PATH, OUTPUT_DIR, leadmagnetSkillPath } from '@/lib/paths';
+import { take } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+// Each /api/draft hit is ~$0.10-0.15 of Anthropic spend (3 calls). Cap at
+// 6 calls per minute and at most 1 in flight — bounds a stuck UI auto-refresh
+// or runaway script to ~$1/hour worst case. Process-local; resets on restart.
+const RATE_CAPACITY = 6;
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_IN_FLIGHT = 1;
 
 type DraftResponse = {
   newDraft: string;
@@ -32,6 +40,22 @@ export async function POST(request: Request) {
   }
   if (prompt.length > 2_000) {
     return NextResponse.json({ error: 'prompt too long (max 2000 chars)' }, { status: 400 });
+  }
+
+  const decision = take({
+    key: 'api/draft',
+    capacity: RATE_CAPACITY,
+    windowMs: RATE_WINDOW_MS,
+    maxInFlight: RATE_MAX_IN_FLIGHT,
+  });
+  if (!decision.allowed) {
+    return NextResponse.json(
+      { error: `rate limited: ${decision.reason}` },
+      {
+        status: 429,
+        headers: { 'retry-after': String(decision.retryAfterSeconds) },
+      },
+    );
   }
 
   const oldPath = leadmagnetSkillPath();
@@ -98,5 +122,7 @@ export async function POST(request: Request) {
       { error: e instanceof Error ? e.message : String(e) },
       { status: 500 },
     );
+  } finally {
+    decision.release();
   }
 }

@@ -94,6 +94,32 @@ def test_parse_judge_json_normalizes_bad_missed_features():
     assert p["missed_features"] == []
 
 
+def test_parse_judge_json_logs_warning_on_unparseable(caplog):
+    """R3: silent fallback to tie was the bug. Each fallback path must log
+    so a Claude API regression doesn't masquerade as 'lots of ties'."""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="src.analyzer.validator")
+    validator._parse_judge_json("not json")
+    assert any("unparseable" in r.message.lower() for r in caplog.records)
+
+
+def test_parse_judge_json_logs_warning_on_missing_winner(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="src.analyzer.validator")
+    validator._parse_judge_json(json.dumps({"reasoning": "no winner"}))
+    assert any("missing 'winner'" in r.message.lower() for r in caplog.records)
+
+
+def test_parse_judge_json_logs_warning_on_invalid_winner(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="src.analyzer.validator")
+    validator._parse_judge_json(json.dumps({"winner": "Z"}))
+    assert any("invalid winner" in r.message.lower() for r in caplog.records)
+
+
 def test_stats_summary_compacts_known_keys(tmp_path: Path):
     payload = {
         "n_posts_analyzed": 200,

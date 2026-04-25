@@ -233,10 +233,17 @@ def _parse_judge_json(raw: str) -> dict:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
+        log.warning("Judge returned unparseable JSON; defaulting to tie. Raw: %s", raw[:160])
         return {"winner": "tie", "reasoning": f"unparseable judge output: {raw[:160]}", "missed_features": []}
     if not isinstance(data, dict) or "winner" not in data:
+        log.warning("Judge response missing 'winner' key; defaulting to tie. Raw: %s", raw[:160])
         return {"winner": "tie", "reasoning": "missing winner", "missed_features": []}
     if data["winner"] not in ("A", "B", "tie"):
+        log.warning(
+            "Judge returned invalid winner=%r; defaulting to tie. This is a Claude "
+            "API output regression worth investigating if it recurs.",
+            data["winner"],
+        )
         data["winner"] = "tie"
     data.setdefault("reasoning", "")
     data.setdefault("missed_features", [])

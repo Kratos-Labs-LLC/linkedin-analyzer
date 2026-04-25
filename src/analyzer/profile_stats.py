@@ -53,9 +53,16 @@ def compute_profile_stats(cfg: AppConfig) -> dict:
     creators_without_rate = 0
 
     with storage.connect(cfg.db_path) as conn:
+        # Only ingest features for currently-active creators. If a creator
+        # was removed from creators.yaml and later re-added, their old
+        # features row survives in the DB; without this filter, stale data
+        # from an inactive period would skew the profile-axis analysis.
         feature_rows = conn.execute(
             """
-            SELECT creator_id, features_json FROM profile_features
+            SELECT pf.creator_id, pf.features_json
+            FROM profile_features pf
+            JOIN creators c ON c.id = pf.creator_id
+            WHERE c.active = 1
             """
         ).fetchall()
         feats_by_creator: dict[int, dict[str, Any]] = {}

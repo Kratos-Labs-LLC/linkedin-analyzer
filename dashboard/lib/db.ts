@@ -31,8 +31,10 @@ export type PostRow = {
   post_date: string | null;
   collected_at: string;
   is_repost_with_commentary: 0 | 1;
-  raw_html: string | null;
   growth_7d: number | null;
+  // raw_html is excluded from the public type because hot paths must not
+  // pull it. If you need it, query it via a dedicated function (none ships
+  // by default; the column lives in src/storage.py for re-extraction).
 };
 
 export type PostWithCreator = PostRow & {
@@ -123,22 +125,32 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_posts_engagement ON posts(engagement_score DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
+CREATE INDEX IF NOT EXISTS idx_posts_creator_engagement
+  ON posts(creator_id, engagement_score DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(run_date);
 CREATE INDEX IF NOT EXISTS idx_cp_creator_time
   ON creator_profiles(creator_id, snapshot_at DESC);
 `;
 
-let _db: Database.Database | null = null;
+// Cache the Database handle on globalThis so Next dev mode's HMR re-uses the
+// open connection across module re-evaluations. Without this, every code
+// edit during dev opens a fresh handle and orphans the prior one — slow
+// connection leak. Production (`next start`) loads the module once and
+// behaves identically either way.
+declare global {
+  // eslint-disable-next-line no-var
+  var __linkedinAnalyzerDb: Database.Database | null | undefined;
+}
 
 export function getDb(): Database.Database {
-  if (_db) return _db;
+  if (globalThis.__linkedinAnalyzerDb) return globalThis.__linkedinAnalyzerDb;
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
   _migrate(db);
-  _db = db;
+  globalThis.__linkedinAnalyzerDb = db;
   return db;
 }
 
@@ -163,9 +175,9 @@ function _migrate(db: Database.Database) {
 }
 
 export function closeDb() {
-  if (_db) {
-    _db.close();
-    _db = null;
+  if (globalThis.__linkedinAnalyzerDb) {
+    globalThis.__linkedinAnalyzerDb.close();
+    globalThis.__linkedinAnalyzerDb = null;
   }
 }
 
@@ -178,6 +190,15 @@ export function computeEngagementScore(
   if (!followerCount || followerCount <= 0) return null;
   return (reactions + 5 * comments + 10 * reshares) / followerCount;
 }
+
+// Explicit posts column list for SELECT — `raw_html` (often ~500KB-1MB per
+// row in production) is intentionally excluded from hot-path queries. Add
+// it back via a dedicated query only when you actually need the HTML
+// (e.g. re-running the extractor against stored snapshots).
+const POST_COLS_NO_HTML =
+  'p.id, p.post_urn, p.creator_id, p.post_url, p.post_text, p.reactions, ' +
+  'p.comments, p.reshares, p.follower_count_at_collection, p.engagement_score, ' +
+  'p.post_date, p.collected_at, p.is_repost_with_commentary, p.growth_7d';
 
 export type YamlCreator = { url: string; name: string; weight: number };
 
@@ -258,7 +279,7 @@ export function listPosts(opts: {
     sort === 'date'
       ? 'p.collected_at DESC'
       : 'p.engagement_score DESC NULLS LAST';
-  const sql = `SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+  const sql = `SELECT ${POST_COLS_NO_HTML}, c.display_name AS creator_name, c.linkedin_url AS creator_url
                FROM posts p JOIN creators c ON c.id = p.creator_id
                WHERE ${clauses.join(' AND ')}
                ORDER BY ${order}
@@ -271,7 +292,7 @@ export function getPost(id: number) {
   const db = getDb();
   const post = db
     .prepare<[number], PostWithCreator>(
-      `SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+      `SELECT ${POST_COLS_NO_HTML}, c.display_name AS creator_name, c.linkedin_url AS creator_url
        FROM posts p JOIN creators c ON c.id = p.creator_id WHERE p.id = ?`,
     )
     .get(id);
@@ -396,7 +417,7 @@ export function latestProfileSnapshot(creatorId: number): ProfileSnapshotRow | u
 export function postsForCreatorByGrowth(creatorId: number, limit = 30): PostWithCreator[] {
   return getDb()
     .prepare<[number, number], PostWithCreator>(
-      `SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+      `SELECT ${POST_COLS_NO_HTML}, c.display_name AS creator_name, c.linkedin_url AS creator_url
        FROM posts p JOIN creators c ON c.id = p.creator_id
        WHERE p.creator_id = ?
        ORDER BY p.growth_7d DESC NULLS LAST, p.engagement_score DESC NULLS LAST
