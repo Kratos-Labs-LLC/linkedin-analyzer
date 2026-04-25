@@ -20,6 +20,7 @@ import {
   collectionSummary,
   postsPerDay,
   recentRuns,
+  topGrowthCreators,
 } from '@/lib/db';
 import { refreshState, isRunning, tailLog } from '@/lib/jobs';
 import { AUTH_SENTINEL } from '@/lib/paths';
@@ -124,6 +125,14 @@ export default function Home() {
         </Panel>
       </div>
 
+      <Panel
+        title="Top growth-rate creators"
+        subtitle="Followers gained per week (linear-fit slope over snapshot series)."
+        className="mb-6"
+      >
+        <TopGrowthList />
+      </Panel>
+
       <Panel title="Day-31 readiness" className="mb-6">
         <ul className="divide-y divide-border -mx-5">
           {readiness.map((g) => (
@@ -217,5 +226,33 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="label">{label}</div>
       <div className="text-sm">{value}</div>
     </div>
+  );
+}
+
+function TopGrowthList() {
+  const rows = topGrowthCreators(5);
+  if (rows.length === 0) {
+    return (
+      <p className="text-sm text-muted">
+        No growth data yet — needs at least 2 profile snapshots per creator.
+      </p>
+    );
+  }
+  return (
+    <ul className="divide-y divide-border -mx-5">
+      {rows.map((r) => (
+        <li key={r.id} className="flex items-center justify-between px-5 py-3">
+          <a href={`/creators/${r.id}`} className="text-sm hover:text-accent">
+            {r.display_name ?? `creator ${r.id}`}
+          </a>
+          <div className="flex items-center gap-4 text-xs tabular text-muted">
+            <span>{fmtNumber(r.latest_follower_count)} followers</span>
+            <span className="text-accent">
+              +{(r.growth_rate_per_week ?? 0).toFixed(1)}/week
+            </span>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

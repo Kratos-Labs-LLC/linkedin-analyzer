@@ -78,7 +78,11 @@ export default function CreatorsPage() {
               <tbody>
                 {creators.map((c) => (
                   <tr key={c.id} className="border-b border-border/60 hover:bg-panel-2/50">
-                    <td className="py-2.5 px-4">{c.display_name ?? '—'}</td>
+                    <td className="py-2.5 px-4">
+                      <a href={`/creators/${c.id}`} className="hover:text-accent">
+                        {c.display_name ?? '—'}
+                      </a>
+                    </td>
                     <td className="py-2.5 px-4 text-xs">
                       <a
                         href={c.linkedin_url}
