@@ -56,9 +56,39 @@ CREATE TABLE IF NOT EXISTS runs (
   errors_json TEXT
 );
 
+-- Profile snapshots over time — one row per visit per creator. The collector
+-- already lands on the profile page each scrape; we persist what's there so
+-- we can compute follower-growth attribution without changing scrape volume.
+CREATE TABLE IF NOT EXISTS creator_profiles (
+  id INTEGER PRIMARY KEY,
+  creator_id INTEGER NOT NULL REFERENCES creators(id),
+  snapshot_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  follower_count INTEGER,
+  headline TEXT,
+  about_text TEXT,
+  current_role TEXT,
+  current_company TEXT,
+  location TEXT,
+  has_profile_photo BOOLEAN,
+  has_banner BOOLEAN,
+  featured_count INTEGER,
+  raw_html TEXT
+);
+
+-- One Claude-extracted feature row per active creator (latest snapshot).
+-- History is in creator_profiles; rich features here.
+CREATE TABLE IF NOT EXISTS profile_features (
+  creator_id INTEGER PRIMARY KEY REFERENCES creators(id),
+  features_json TEXT NOT NULL,
+  extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  source_snapshot_id INTEGER REFERENCES creator_profiles(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_posts_engagement ON posts(engagement_score DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
 CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(run_date);
+CREATE INDEX IF NOT EXISTS idx_cp_creator_time
+  ON creator_profiles(creator_id, snapshot_at DESC);
 """
 
 
@@ -74,9 +104,53 @@ def init_db(path: Path) -> None:
 # need an explicit ALTER. Each migration wraps in a column-presence check so
 # re-running init_db is a no-op.
 def _migrate(conn: sqlite3.Connection) -> None:
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}
-    if "raw_html" not in cols:
+    posts_cols = {row[1] for row in conn.execute("PRAGMA table_info(posts)").fetchall()}
+    if "raw_html" not in posts_cols:
         conn.execute("ALTER TABLE posts ADD COLUMN raw_html TEXT")
+    if "growth_7d" not in posts_cols:
+        # Follower delta in the 7 days following the post; recomputable via
+        # src/analyzer/growth.py:recompute_post_growth.
+        conn.execute("ALTER TABLE posts ADD COLUMN growth_7d INTEGER")
+
+    # creator_profiles + profile_features are introduced in this migration;
+    # CREATE IF NOT EXISTS in SCHEMA handles them on fresh DBs, but legacy
+    # DBs still need them — re-run the relevant DDL here as a safety net.
+    # (CREATE IF NOT EXISTS makes it idempotent regardless of how we arrive.)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS creator_profiles (
+          id INTEGER PRIMARY KEY,
+          creator_id INTEGER NOT NULL REFERENCES creators(id),
+          snapshot_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          follower_count INTEGER,
+          headline TEXT,
+          about_text TEXT,
+          current_role TEXT,
+          current_company TEXT,
+          location TEXT,
+          has_profile_photo BOOLEAN,
+          has_banner BOOLEAN,
+          featured_count INTEGER,
+          raw_html TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS profile_features (
+          creator_id INTEGER PRIMARY KEY REFERENCES creators(id),
+          features_json TEXT NOT NULL,
+          extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          source_snapshot_id INTEGER REFERENCES creator_profiles(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_cp_creator_time
+          ON creator_profiles(creator_id, snapshot_at DESC)
+        """
+    )
 
 
 @contextmanager
@@ -231,6 +305,87 @@ def insert_post(
         ),
     )
     return cur.rowcount > 0
+
+
+def insert_profile_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    creator_id: int,
+    follower_count: int | None = None,
+    headline: str | None = None,
+    about_text: str | None = None,
+    current_role: str | None = None,
+    current_company: str | None = None,
+    location: str | None = None,
+    has_profile_photo: bool | None = None,
+    has_banner: bool | None = None,
+    featured_count: int | None = None,
+    raw_html: str | None = None,
+    snapshot_at: str | None = None,
+) -> int:
+    """Insert a profile snapshot. Returns the new row's id.
+
+    Snapshots accumulate — duplicate inserts are intentional. The deltas
+    between consecutive rows (by snapshot_at) are what `growth.py` uses to
+    attribute follower growth to posts and creators.
+    """
+    cur = conn.execute(
+        """
+        INSERT INTO creator_profiles
+          (creator_id, follower_count, headline, about_text, current_role,
+           current_company, location, has_profile_photo, has_banner,
+           featured_count, raw_html, snapshot_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+        """,
+        (
+            creator_id,
+            follower_count,
+            headline,
+            about_text,
+            current_role,
+            current_company,
+            location,
+            None if has_profile_photo is None else (1 if has_profile_photo else 0),
+            None if has_banner is None else (1 if has_banner else 0),
+            featured_count,
+            raw_html,
+            snapshot_at,
+        ),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def latest_profile_snapshot(
+    conn: sqlite3.Connection, creator_id: int
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT *
+        FROM creator_profiles
+        WHERE creator_id = ?
+        ORDER BY snapshot_at DESC
+        LIMIT 1
+        """,
+        (creator_id,),
+    ).fetchone()
+
+
+def list_profile_snapshots(
+    conn: sqlite3.Connection, creator_id: int
+) -> list[sqlite3.Row]:
+    """Oldest first — convenient for time-series math (growth slope, deltas)."""
+    return list(
+        conn.execute(
+            """
+            SELECT id, snapshot_at, follower_count
+            FROM creator_profiles
+            WHERE creator_id = ?
+              AND follower_count IS NOT NULL
+            ORDER BY snapshot_at ASC
+            """,
+            (creator_id,),
+        )
+    )
 
 
 def recompute_all_engagement_scores(conn: sqlite3.Connection) -> int:
