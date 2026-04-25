@@ -17,7 +17,11 @@ from src.config import AppConfig
 log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-4-7"
-MAX_TOKENS = 8_000
+MAX_TOKENS_DRAFT = 8_000
+# Revise must emit the entire SKILL.md again. Give it more headroom than the
+# draft so we never truncate when the model adds material to address critique.
+MAX_TOKENS_REVISE = 16_000
+TEMPERATURE = 0.7
 
 DUGG_VOICE_PROFILE = """- All lowercase
 - Short, punchy sentences
@@ -122,7 +126,8 @@ OUTPUT:
 def _draft(client: Anthropic, static_inputs_text: str) -> str:
     resp = client.messages.create(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
+        max_tokens=MAX_TOKENS_DRAFT,
+        temperature=TEMPERATURE,
         system=[
             {
                 "type": "text",
@@ -143,7 +148,8 @@ def _critique_and_revise(
 ) -> str:
     resp = client.messages.create(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
+        max_tokens=MAX_TOKENS_REVISE,
+        temperature=TEMPERATURE,
         system=[
             {
                 "type": "text",
@@ -171,15 +177,38 @@ def _extract_text(resp) -> str:
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
 
+MIN_REVISE_LENGTH = 500
+SKILL_NAME = "linkedin-high-engagement-writer"
+
+
+def _looks_like_skill_md(text: str) -> bool:
+    """Sanity-check that the revise pass returned a real SKILL.md, not just a
+    critique block, an apology, or a truncated stub."""
+    if len(text) < MIN_REVISE_LENGTH:
+        return False
+    head = text.lstrip()
+    if not head.startswith("---"):  # YAML frontmatter required
+        return False
+    if SKILL_NAME not in text:
+        return False
+    return True
+
+
 def _strip_critique_block(text: str) -> str:
-    """Remove a leading <critique>...</critique> block if present."""
-    lower = text.lower()
-    if "<critique>" not in lower:
+    """Remove a LEADING <critique>...</critique> block if present.
+
+    Only strips when the block is at the very start (after whitespace) — so a
+    `</critique>` that legitimately appears later in the body (e.g. as a
+    quoted example) is left alone.
+    """
+    stripped = text.lstrip()
+    lower = stripped.lower()
+    if not lower.startswith("<critique>"):
         return text
     end = lower.find("</critique>")
     if end == -1:
         return text
-    return text[end + len("</critique>") :].lstrip()
+    return stripped[end + len("</critique>") :].lstrip()
 
 
 # --- Public API --------------------------------------------------------------
@@ -215,6 +244,16 @@ def synthesize(cfg: AppConfig, leadmagnet_skill_path: Path) -> Path:
     log.info("Synthesis pass 2/2: critique-and-revise (cached static inputs)...")
     final = _critique_and_revise(client, static, draft)
     log.info("Final length: %d chars.", len(final))
+
+    if not _looks_like_skill_md(final):
+        log.warning(
+            "Revise pass output failed sanity check (len=%d, starts_with_frontmatter=%s, "
+            "contains_skill_name=%s). Falling back to draft.",
+            len(final),
+            final.lstrip().startswith("---"),
+            SKILL_NAME in final,
+        )
+        final = draft
 
     out_dir = cfg.output_dir / "linkedin-high-engagement-writer"
     out_dir.mkdir(parents=True, exist_ok=True)

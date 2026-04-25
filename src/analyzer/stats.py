@@ -206,6 +206,12 @@ def compute_stats(cfg: AppConfig, min_posts_per_topic: int = MIN_POSTS_PER_TOPIC
         "by_topic": by_topic,
         "topics_skipped_min_n": skipped_topics,
         "min_posts_per_topic": min_posts_per_topic,
+        "note": (
+            "by_topic[<topic>].top_quartile_mean / bottom_quartile_mean are "
+            "computed within each topic's own subset, not against the global "
+            "engagement distribution. Treat per-topic numbers as relative "
+            "rankings inside that topic, not as absolute thresholds."
+        ),
     }
 
 

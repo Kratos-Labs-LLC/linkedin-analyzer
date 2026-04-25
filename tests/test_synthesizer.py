@@ -79,8 +79,25 @@ class _Resp:
         self.content = [_Block(text)]
 
 
+_GOOD_REVISED = (
+    "<critique>\n- frontmatter missing\n- voice not applied\n</critique>\n\n"
+    "---\nname: linkedin-high-engagement-writer\n"
+    "description: Author empirically-grounded LinkedIn thought-leadership posts.\n"
+    "---\n\n"
+    "# linkedin-high-engagement-writer\n\nbody after revision\n\n"
+    + "filler line for length sanity check.\n" * 30
+)
+
+_GOOD_DRAFT = (
+    "---\nname: linkedin-high-engagement-writer\n"
+    "description: draft\n---\n\n"
+    "# DRAFT BODY (intentionally minimal)\n\n"
+    + "filler line for length sanity check.\n" * 30
+)
+
+
 class _FakeAnthropic:
-    """Records calls; returns canned draft on first call, revised on second."""
+    """Records calls; first call returns a draft, second returns critique + revised body."""
 
     def __init__(self, *args, **kwargs):
         self.calls: list[dict] = []
@@ -90,13 +107,8 @@ class _FakeAnthropic:
         self.calls.append(kwargs)
         n = len(self.calls)
         if n == 1:
-            return _Resp("DRAFT BODY (frontmatter missing on purpose)")
-        # Second call returns critique + revised body
-        return _Resp(
-            "<critique>\n- frontmatter missing\n- voice not applied\n</critique>\n\n"
-            "---\nname: linkedin-high-engagement-writer\n---\n\n"
-            "# Final SKILL.md\n\nbody after revision"
-        )
+            return _Resp(_GOOD_DRAFT)
+        return _Resp(_GOOD_REVISED)
 
 
 def test_synthesize_runs_two_passes_and_writes_files(tmp_path: Path):
@@ -171,3 +183,101 @@ def test_synthesize_requires_leadmagnet_file(tmp_path: Path):
     cfg = _cfg(tmp_path)
     with pytest.raises(FileNotFoundError):
         synthesizer.synthesize(cfg, tmp_path / "missing.md")
+
+
+# --- S1 fallback ---------------------------------------------------------
+
+
+class _BadReviseFakeAnthropic:
+    """Pass 2 returns just the critique, no SKILL.md body — should trigger fallback."""
+
+    def __init__(self, *args, **kwargs):
+        self.calls: list[dict] = []
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        n = len(self.calls)
+        if n == 1:
+            return _Resp(_GOOD_DRAFT)
+        return _Resp("<critique>\n- everything is wrong\n</critique>")
+
+
+def test_synthesize_falls_back_to_draft_when_revise_is_malformed(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    leadmagnet = tmp_path / "leadmagnet.md"
+    leadmagnet.write_text("LEAD")
+
+    fake = _BadReviseFakeAnthropic()
+    with patch.object(synthesizer, "Anthropic", lambda **kw: fake):
+        out = synthesizer.synthesize(cfg, leadmagnet)
+
+    body = out.read_text()
+    # Falls back to draft
+    assert "DRAFT BODY" in body
+    # Draft preserved separately too
+    assert (cfg.output_dir / "synthesis_draft.md").exists()
+
+
+class _ShortReviseFakeAnthropic:
+    """Pass 2 returns frontmatter but body is too short — should fall back."""
+
+    def __init__(self, *args, **kwargs):
+        self.calls: list[dict] = []
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        n = len(self.calls)
+        if n == 1:
+            return _Resp(_GOOD_DRAFT)
+        return _Resp("---\nname: linkedin-high-engagement-writer\n---\n# tiny")
+
+
+def test_synthesize_falls_back_when_revise_is_too_short(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    leadmagnet = tmp_path / "leadmagnet.md"
+    leadmagnet.write_text("LEAD")
+
+    fake = _ShortReviseFakeAnthropic()
+    with patch.object(synthesizer, "Anthropic", lambda **kw: fake):
+        out = synthesizer.synthesize(cfg, leadmagnet)
+
+    assert "DRAFT BODY" in out.read_text()
+
+
+# --- S4 strip safety -----------------------------------------------------
+
+
+def test_strip_critique_block_does_not_strip_when_critique_is_not_at_start():
+    """A </critique> embedded later in the body shouldn't trigger over-strip."""
+    text = (
+        "---\nname: skill\n---\n\n"
+        "# Skill\n\nThe judge expects `<critique>foo</critique>` style output."
+    )
+    assert synthesizer._strip_critique_block(text) == text
+
+
+def test_strip_critique_block_handles_leading_whitespace():
+    text = "  \n\n<critique>foo</critique>\n# Final"
+    assert synthesizer._strip_critique_block(text) == "# Final"
+
+
+# --- S2 / S3 explicit assertions on call kwargs ---------------------------
+
+
+def test_synthesize_sets_temperature_and_distinct_max_tokens(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    leadmagnet = tmp_path / "leadmagnet.md"
+    leadmagnet.write_text("LEAD")
+
+    fake = _FakeAnthropic()
+    with patch.object(synthesizer, "Anthropic", lambda **kw: fake):
+        synthesizer.synthesize(cfg, leadmagnet)
+
+    draft_call, revise_call = fake.calls
+    # Temperature pinned for reproducibility
+    assert draft_call["temperature"] == synthesizer.TEMPERATURE
+    assert revise_call["temperature"] == synthesizer.TEMPERATURE
+    # Revise gets more headroom than draft
+    assert revise_call["max_tokens"] > draft_call["max_tokens"]
