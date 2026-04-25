@@ -15,6 +15,7 @@ from src import storage  # noqa: E402
 from src.analyzer import (  # noqa: E402
     extractor,
     growth,
+    profile_audit,
     profile_extractor,
     profile_stats,
     profile_synthesizer,
@@ -169,6 +170,13 @@ def main() -> int:
         log.info("Profile step 4: synthesize linkedin-profile-optimizer (~$1.30)")
         profile_skill_path = profile_synthesizer.synthesize(cfg)
         log.info("Wrote %s.", profile_skill_path)
+
+        # Step 5 (gated): personal audit. Only fires when MY_PROFILE_URL is
+        # set. Returns None silently otherwise — no error.
+        log.info("Profile step 5: personal audit (gated on MY_PROFILE_URL, ~$0.50)")
+        audit_path = profile_audit.audit(cfg)
+        if audit_path is not None:
+            log.info("Wrote %s.", audit_path)
 
     if run_validation:
         new_skill_path = cfg.output_dir / "linkedin-high-engagement-writer" / "SKILL.md"
