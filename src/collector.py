@@ -16,6 +16,7 @@ from src.parser import (
     parse_post_html,
     passes_inclusion_rules,
 )
+from src.profile_parser import parse_profile_attributes
 
 log = logging.getLogger(__name__)
 
@@ -62,9 +63,33 @@ async def _scrape_creator(page, creator: CreatorConfig, creator_id: int, conn) -
     follower_count: int | None = None
     try:
         html = await page.content()
-        follower_count = parse_follower_count(html)
+        # Full profile snapshot — follower count comes back from this same
+        # parser (parse_follower_count is reused under the hood).
+        snapshot = parse_profile_attributes(html)
+        follower_count = snapshot.follower_count
+        try:
+            storage.insert_profile_snapshot(
+                conn,
+                creator_id=creator_id,
+                follower_count=snapshot.follower_count,
+                headline=snapshot.headline,
+                about_text=snapshot.about_text,
+                current_role=snapshot.current_role,
+                current_company=snapshot.current_company,
+                location=snapshot.location,
+                has_profile_photo=snapshot.has_profile_photo,
+                has_banner=snapshot.has_banner,
+                featured_count=snapshot.featured_count,
+                raw_html=snapshot.raw_html,
+            )
+        except Exception as e:
+            log.warning(
+                "Failed to persist profile snapshot for %s: %s",
+                creator.display_name,
+                e,
+            )
     except Exception as e:
-        log.warning("Failed to read follower count for %s: %s", creator.display_name, e)
+        log.warning("Failed to read profile for %s: %s", creator.display_name, e)
 
     # 2) Activity feed
     await page.goto(creator.activity_url, wait_until="domcontentloaded", timeout=30_000)
