@@ -157,6 +157,52 @@ def test_sample_prompts_returns_empty_for_empty_db(tmp_path: Path):
     assert validator._sample_prompts(cfg, n=5) == []
 
 
+def test_sample_prompts_only_draws_from_top_half(tmp_path: Path):
+    """V1: bottom-half posts must never appear as prompts."""
+    cfg = _cfg(tmp_path)
+    _seed_top_quartile_with_features(cfg.db_path, n=20)
+
+    # All posts have engagement_score; reactions ascend with i. Top half = i in [10..19].
+    with patch.object(validator, "HELD_OUT_OFFSET", 0):
+        cases = validator._sample_prompts(cfg, n=20)
+
+    assert cases, "expected non-empty sample"
+    with storage.connect(cfg.db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, engagement_score FROM posts ORDER BY engagement_score DESC"
+        ).fetchall()
+    median = rows[len(rows) // 2 - 1]["engagement_score"]
+    for c in cases:
+        # Find this post's score.
+        score = next(r["engagement_score"] for r in rows if r["id"] == c.post_id)
+        assert score >= median, f"post {c.post_id} (score {score}) is below median {median}"
+
+
+def test_run_validation_caps_n(tmp_path: Path):
+    """V4: --validate-n above MAX_N_PROMPTS is clamped, not honored."""
+    cfg = _cfg(tmp_path)
+    _seed_top_quartile_with_features(cfg.db_path, n=120)
+    cfg.output_dir.mkdir()
+    old_skill = tmp_path / "old.md"
+    new_skill = tmp_path / "new.md"
+    old_skill.write_text("OLD")
+    new_skill.write_text("NEW")
+
+    fake = _FakeAnthropic()
+
+    def _factory(*args, **kwargs):
+        return fake
+
+    with patch.object(validator, "Anthropic", _factory), \
+         patch.object(validator, "HELD_OUT_OFFSET", 0), \
+         patch.object(validator, "MAX_N_PROMPTS", 4):
+        result = validator.run_validation(
+            cfg, old_skill_path=old_skill, new_skill_path=new_skill, n=999, seed=1
+        )
+
+    assert result.n_prompts <= 4
+
+
 # --- end-to-end with mocked Anthropic --------------------------------------
 
 

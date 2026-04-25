@@ -20,7 +20,6 @@ import logging
 import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
 
 from anthropic import Anthropic
 
@@ -33,10 +32,15 @@ DRAFT_MODEL = "claude-sonnet-4-5"
 JUDGE_MODEL = "claude-opus-4-7"
 
 DEFAULT_N_PROMPTS = 15
-HELD_OUT_OFFSET = 50  # skip the top-50 the synthesizer saw verbatim
+MAX_N_PROMPTS = 50  # safety cap on --validate-n; ~$3 ceiling
+# Skip the top-50 posts the synthesizer saw verbatim. Posts beyond 50 are still
+# indirectly represented through stats.json (means, correlations) — but no
+# verbatim memorization is possible from this slice.
+HELD_OUT_OFFSET = 50
 PER_TOPIC_CAP = 2     # diversify
 DRAFT_MAX_TOKENS = 1_200
 JUDGE_MAX_TOKENS = 1_200
+DRAFT_TEMPERATURE = 0.3  # low enough that A/B is reproducible across runs
 
 
 @dataclass
@@ -77,7 +81,11 @@ class ValidationResult:
 
 
 def _sample_prompts(cfg: AppConfig, n: int = DEFAULT_N_PROMPTS) -> list[PromptCase]:
-    """Pick N held-out top-quartile posts, diversified by topic_category."""
+    """Pick N held-out top-quartile posts, diversified by topic_category.
+
+    Restrict to the top half of scored posts (matches what the synthesizer
+    actually trained on), then skip the verbatim-leaked top 50.
+    """
     with storage.connect(cfg.db_path) as conn:
         rows = conn.execute(
             """
@@ -89,9 +97,17 @@ def _sample_prompts(cfg: AppConfig, n: int = DEFAULT_N_PROMPTS) -> list[PromptCa
             """,
         ).fetchall()
 
-    held_out = list(rows)[HELD_OUT_OFFSET:]
+    if not rows:
+        return []
+
+    # Top half = "top quartile" in the synthesizer's framing.
+    top_half_cut = max(1, len(rows) // 2)
+    top_half = list(rows)[:top_half_cut]
+    held_out = top_half[HELD_OUT_OFFSET:]
     if not held_out:
-        held_out = list(rows)  # tiny dataset -> use whatever we have
+        # Tiny dataset (or all in the held-out window) — fall back to whatever
+        # is available so we still produce a result.
+        held_out = top_half or list(rows)
 
     cases: list[PromptCase] = []
     per_topic: dict[str, int] = {}
@@ -148,7 +164,7 @@ def _draft(client: Anthropic, skill_md: str, prompt: str) -> str:
     resp = client.messages.create(
         model=DRAFT_MODEL,
         max_tokens=DRAFT_MAX_TOKENS,
-        temperature=0.7,
+        temperature=DRAFT_TEMPERATURE,
         system=[{
             "type": "text",
             "text": skill_md,
@@ -282,6 +298,10 @@ def run_validation(
     if not new_skill_path.exists():
         raise FileNotFoundError(f"new skill not found: {new_skill_path}")
 
+    if n > MAX_N_PROMPTS:
+        log.warning("Capping --validate-n from %d to %d to bound API spend.", n, MAX_N_PROMPTS)
+        n = MAX_N_PROMPTS
+
     rng = random.Random(seed)
     old_md = old_skill_path.read_text()
     new_md = new_skill_path.read_text()
@@ -375,11 +395,6 @@ def write_report(result: ValidationResult, output_dir: Path) -> Path:
     else:
         lines.append("❌ The existing skill still wins. Do not install the new one until the synthesizer is improved.")
     lines.append("")
-
-    by_winner = {"new": [], "old": [], "tie": []}
-    for p in result.pairs:
-        by_winner[p.winner].append(p)
-
     lines.append("## Per-prompt verdicts")
     for i, p in enumerate(result.pairs, start=1):
         emoji = {"new": "🟢 new", "old": "🔴 old", "tie": "⚪ tie"}[p.winner]
