@@ -25,3 +25,11 @@ export const NEW_SKILL_PATH = path.join(
   'linkedin-high-engagement-writer',
   'SKILL.md',
 );
+
+export const PROFILE_SKILL_PATH = path.join(
+  OUTPUT_DIR,
+  'linkedin-profile-optimizer',
+  'SKILL.md',
+);
+
+export const PROFILE_AUDIT_PATH = path.join(OUTPUT_DIR, 'profile_audit.md');

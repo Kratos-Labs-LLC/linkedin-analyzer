@@ -67,7 +67,7 @@ class _ProfileHTMLExtractor(HTMLParser):
         self._in_about_depth = 0
         self._in_about_text_depth = 0
         self._in_experience_depth = 0
-        self._first_experience_role: str | None = None
+        self.first_experience_role: str | None = None
         self._capture_first_experience_text_depth = 0
         self._in_featured_depth = 0
         # Headline grabber: capture the first text after we see a headline-like
@@ -102,7 +102,7 @@ class _ProfileHTMLExtractor(HTMLParser):
             self._in_about_depth += 1
             # Capture text inside about, but skip "About" heading itself.
             if tag in ("p", "span", "div"):
-                self._in_about_text_depth = max(self._in_about_text_depth, 0) + 1
+                self._in_about_text_depth += 1
 
         if sid in EXPERIENCE_SECTION_ID_HINTS:
             self._in_experience_depth += 1
@@ -112,7 +112,7 @@ class _ProfileHTMLExtractor(HTMLParser):
             if (
                 self._capture_first_experience_text_depth > 0
                 and tag in ("span", "div", "p")
-                and self._first_experience_role is None
+                and self.first_experience_role is None
             ):
                 self._capture_first_experience_text_depth += 1
 
@@ -139,7 +139,7 @@ class _ProfileHTMLExtractor(HTMLParser):
         # photo. Rather than depend on order, we capture every text-body-small
         # text and pick the most "city-ish" one later.
         if any(h in cls for h in LOCATION_CLASS_HINTS):
-            self._capture_location_depth = max(self._capture_location_depth, 0) + 1
+            self._capture_location_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
         if self._in_about_depth > 0:
@@ -173,11 +173,11 @@ class _ProfileHTMLExtractor(HTMLParser):
         if (
             self._in_experience_depth > 0
             and self._capture_first_experience_text_depth > 0
-            and self._first_experience_role is None
+            and self.first_experience_role is None
         ):
             # The first non-whitespace text inside the experience section is
             # the role. The next "at <Company>" pattern feeds the company.
-            self._first_experience_role = text
+            self.first_experience_role = text
         if self._capture_location_depth > 0:
             # Heuristic: city-ish if it has a comma, no colon, no parentheses.
             if "," in text and ":" not in text and "(" not in text and len(text) <= 80:
@@ -222,7 +222,7 @@ def parse_profile_attributes(html: str) -> ProfileSnapshot:
     if about_text and len(about_text) > 4000:
         about_text = about_text[:4000]
 
-    role, company = _extract_role_and_company(ex._first_experience_role)
+    role, company = _extract_role_and_company(ex.first_experience_role)
     location = _normalize(ex.location_chunks[0]) if ex.location_chunks else None
 
     return ProfileSnapshot(

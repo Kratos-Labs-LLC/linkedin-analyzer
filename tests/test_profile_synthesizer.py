@@ -200,3 +200,53 @@ def test_synthesize_requires_stats_json_to_exist(tmp_path: Path):
     with patch.object(profile_synthesizer, "Anthropic", lambda **kw: fake):
         with pytest.raises(FileNotFoundError):
             profile_synthesizer.synthesize(cfg)
+
+
+def test_synthesize_returns_none_below_min_creators_threshold(tmp_path: Path):
+    """B2: when profile_axis.n_creators_analyzed < MIN_CREATORS_FOR_SYNTH the
+    synth refuses to run — saves ~$1.30 of Opus on a no-data run."""
+    cfg = _cfg(tmp_path)
+    # Override stats.json so n_creators_analyzed is below threshold.
+    (cfg.output_dir / "stats.json").write_text(
+        json.dumps(
+            {
+                "profile_axis": {
+                    "n_creators_analyzed": 2,  # below MIN_CREATORS_FOR_SYNTH=5
+                    "score_field": "growth_rate_per_week",
+                    "categorical_features": {},
+                }
+            }
+        )
+    )
+    fake = _FakeAnthropic()
+    with patch.object(profile_synthesizer, "Anthropic", lambda **kw: fake):
+        result = profile_synthesizer.synthesize(cfg)
+
+    assert result is None
+    # No Anthropic calls — burn-no-spend guarantee
+    assert len(fake.calls) == 0
+    # No SKILL.md / draft files emitted
+    assert not (cfg.output_dir / "linkedin-profile-optimizer" / "SKILL.md").exists()
+    assert not (cfg.output_dir / "profile_synthesis_draft.md").exists()
+
+
+def test_synthesize_runs_at_threshold(tmp_path: Path):
+    """Boundary: n == MIN_CREATORS_FOR_SYNTH still runs."""
+    cfg = _cfg(tmp_path)
+    (cfg.output_dir / "stats.json").write_text(
+        json.dumps(
+            {
+                "profile_axis": {
+                    "n_creators_analyzed": profile_synthesizer.MIN_CREATORS_FOR_SYNTH,
+                    "score_field": "growth_rate_per_week",
+                    "categorical_features": {},
+                }
+            }
+        )
+    )
+    fake = _FakeAnthropic()
+    with patch.object(profile_synthesizer, "Anthropic", lambda **kw: fake):
+        result = profile_synthesizer.synthesize(cfg)
+
+    assert result is not None
+    assert result.exists()

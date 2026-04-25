@@ -76,7 +76,7 @@ def test_parse_and_validate_happy():
         {k: ("test" if "type" in k or "voice" in k or "alignment" in k or "breadth" in k else 5)
          for k in profile_extractor.EXPECTED_KEYS}
     )
-    out = profile_extractor._parse_and_validate(raw)
+    out = profile_extractor.parse_and_validate(raw)
     assert out is not None
     assert set(out.keys()) >= profile_extractor.EXPECTED_KEYS
 
@@ -84,16 +84,16 @@ def test_parse_and_validate_happy():
 def test_parse_and_validate_handles_code_fences():
     payload = {k: 0 for k in profile_extractor.EXPECTED_KEYS}
     raw = "```json\n" + json.dumps(payload) + "\n```"
-    assert profile_extractor._parse_and_validate(raw) is not None
+    assert profile_extractor.parse_and_validate(raw) is not None
 
 
 def test_parse_and_validate_rejects_missing_keys():
     raw = json.dumps({"headline_style": "credentialed"})  # only 1 of 10 keys
-    assert profile_extractor._parse_and_validate(raw) is None
+    assert profile_extractor.parse_and_validate(raw) is None
 
 
 def test_parse_and_validate_rejects_unparseable():
-    assert profile_extractor._parse_and_validate("not json") is None
+    assert profile_extractor.parse_and_validate("not json") is None
 
 
 def test_build_user_message_includes_profile_and_posts():
@@ -113,7 +113,7 @@ def test_build_user_message_includes_profile_and_posts():
         follower_count=42_000,
     )
     posts = [_Row(post_text="recent winning post about AI")]
-    msg = profile_extractor._build_user_message(profile_row=profile, top_posts=posts)
+    msg = profile_extractor.build_user_message(profile_row=profile, top_posts=posts)
     assert "My headline" in msg
     assert "About me text" in msg
     assert "CTO" in msg

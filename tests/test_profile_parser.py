@@ -137,6 +137,18 @@ def test_parse_picks_up_location_when_text_body_small_has_comma():
     assert snap.location == "London, United Kingdom"
 
 
+def test_first_experience_role_is_a_public_extractor_field():
+    """F2: cross-module readers (profile_audit, eventual dashboard helpers)
+    shouldn't reach across an underscore boundary."""
+    from src.profile_parser import _ProfileHTMLExtractor
+
+    ex = _ProfileHTMLExtractor()
+    ex.feed(
+        '<section id="experience"><span>Founder at Acme</span></section>'
+    )
+    assert ex.first_experience_role == "Founder at Acme"
+
+
 def test_parse_full_synthetic_profile():
     """Sanity: a synthetic profile that exercises every field at once."""
     html = """

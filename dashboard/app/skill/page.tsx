@@ -3,7 +3,13 @@ import path from 'node:path';
 
 import { DraftPanel } from '@/components/draft-panel';
 import { Empty, LinkButton, PageHeader, Panel, Stat } from '@/components/ui';
-import { NEW_SKILL_PATH, OUTPUT_DIR, leadmagnetSkillPath } from '@/lib/paths';
+import {
+  NEW_SKILL_PATH,
+  OUTPUT_DIR,
+  PROFILE_AUDIT_PATH,
+  PROFILE_SKILL_PATH,
+  leadmagnetSkillPath,
+} from '@/lib/paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +48,8 @@ export default function SkillPage() {
   const top = readIf(topPath);
   const bottom = readIf(bottomPath);
   const validation = readIf(validationPath);
+  const profileSkill = readIf(PROFILE_SKILL_PATH);
+  const profileAudit = readIf(PROFILE_AUDIT_PATH);
 
   const verdict = parseVerdict(validation);
 
@@ -94,11 +102,39 @@ export default function SkillPage() {
         </Panel>
       ) : null}
 
-      <Panel title="SKILL.md" className="mb-4">
+      <Panel
+        title="linkedin-high-engagement-writer/SKILL.md"
+        subtitle={skillPath}
+        className="mb-4"
+      >
         <pre className="whitespace-pre-wrap break-words text-xs font-mono p-4 bg-bg rounded border border-border max-h-[60vh] overflow-auto">
           {skill}
         </pre>
       </Panel>
+
+      {profileSkill ? (
+        <Panel
+          title="linkedin-profile-optimizer/SKILL.md"
+          subtitle={PROFILE_SKILL_PATH}
+          className="mb-4"
+        >
+          <pre className="whitespace-pre-wrap break-words text-xs font-mono p-4 bg-bg rounded border border-border max-h-[60vh] overflow-auto">
+            {profileSkill}
+          </pre>
+        </Panel>
+      ) : null}
+
+      {profileAudit ? (
+        <Panel
+          title="Personal profile audit"
+          subtitle={`${PROFILE_AUDIT_PATH} — generated when MY_PROFILE_URL is set`}
+          className="mb-4"
+        >
+          <pre className="whitespace-pre-wrap break-words text-xs font-mono p-4 bg-bg rounded border border-border max-h-[60vh] overflow-auto">
+            {profileAudit}
+          </pre>
+        </Panel>
+      ) : null}
 
       {stats ? (
         <Panel title="stats.json" className="mb-4">

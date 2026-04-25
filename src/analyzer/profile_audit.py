@@ -32,8 +32,8 @@ from src.analyzer.profile_extractor import (
     INSTRUCTION_BLOCK as PROFILE_EXTRACT_INSTRUCTION,
     MODEL as EXTRACT_MODEL,
     MAX_TOKENS as EXTRACT_MAX_TOKENS,
-    _build_user_message as build_extract_user_message,
-    _parse_and_validate as parse_extract_response,
+    build_user_message as build_extract_user_message,
+    parse_and_validate as parse_extract_response,
 )
 from src.analyzer.validator import _stats_summary  # reuses the proven compactor
 

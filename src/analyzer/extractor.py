@@ -13,6 +13,7 @@ from pathlib import Path
 from anthropic import Anthropic
 
 from src import storage
+from src.analyzer._retry import with_retry
 from src.config import AppConfig
 
 log = logging.getLogger(__name__)
@@ -108,18 +109,21 @@ def _parse_and_validate(raw: str) -> dict | None:
 
 
 def _call_claude(client: Anthropic, post_row, temperature: float = 0.2) -> dict | None:
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        temperature=temperature,
-        system=[
-            {
-                "type": "text",
-                "text": INSTRUCTION_BLOCK,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": _build_user_message(post_row)}],
+    resp = with_retry(
+        lambda: client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            temperature=temperature,
+            system=[
+                {
+                    "type": "text",
+                    "text": INSTRUCTION_BLOCK,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": _build_user_message(post_row)}],
+        ),
+        description=f"feature extraction post={post_row['id']}",
     )
     text = "".join(
         block.text for block in resp.content if getattr(block, "type", "") == "text"
