@@ -12,7 +12,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import storage  # noqa: E402
-from src.analyzer import extractor, stats, synthesizer, validator  # noqa: E402
+from src.analyzer import (  # noqa: E402
+    extractor,
+    growth,
+    profile_extractor,
+    profile_stats,
+    profile_synthesizer,
+    stats,
+    synthesizer,
+    validator,
+)
 from src.config import load_config  # noqa: E402
 
 MIN_POSTS = 800
@@ -77,12 +86,27 @@ def main() -> int:
         default=validator.DEFAULT_N_PROMPTS,
         help="How many prompts to evaluate during validation (default 15).",
     )
+    parser.add_argument(
+        "--skip-profile",
+        action="store_true",
+        help="Skip profile axis (extractor + stats + profile synth).",
+    )
+    parser.add_argument(
+        "--profile-only",
+        action="store_true",
+        help="Skip post extract/stats/synth/validate; only run the profile axis.",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
     storage.init_db(cfg.db_path)
 
-    if not args.validate_only:
+    # --profile-only and --validate-only short-circuit the post pipeline.
+    run_post_pipeline = not (args.validate_only or args.profile_only)
+    run_profile_pipeline = not args.skip_profile and not args.validate_only
+    run_validation = not args.skip_validate and not args.profile_only
+
+    if run_post_pipeline:
         reasons = _check_readiness(cfg)
         if reasons and not args.force:
             log.error("Analysis preconditions not met:")
@@ -99,48 +123,73 @@ def main() -> int:
             log.info("Recomputed engagement scores for %d posts.", n)
 
         if not args.skip_extract:
-            log.info("Step 1/4: feature extraction")
+            log.info("Post step 1: feature extraction")
             extractor.extract_features(cfg)
 
-        log.info("Step 2/4: stats")
+        log.info("Post step 2: stats")
         stats_dict = stats.compute_stats(cfg)
         stats.write_stats_json(stats_dict, cfg.output_dir)
         stats.write_top_bottom_markdown(cfg, cfg.output_dir, limit=50)
         log.info("Wrote stats.json, top_posts.md, bottom_posts.md to %s", cfg.output_dir)
 
         if args.skip_synth:
-            log.info("Skipping synthesis.")
-            if args.skip_validate:
-                return 0
+            log.info("Skipping post synthesis.")
         else:
-            log.info("Step 3/4: synthesis")
+            log.info("Post step 3: synthesis")
             out = synthesizer.synthesize(cfg, args.leadmagnet_skill_path)
-            log.info("Wrote %s. Review, then install to ~/.claude/skills/.", out)
+            log.info("Wrote %s.", out)
 
-    if args.skip_validate:
-        return 0
+    if run_profile_pipeline:
+        log.info("Profile step 1: backfill posts.growth_7d from snapshots")
+        growth_summary = growth.recompute_post_growth(cfg)
+        log.info(
+            "  growth_7d: updated=%d skipped=%d creators_with_snapshots=%d",
+            growth_summary["updated"],
+            growth_summary["skipped"],
+            growth_summary["creators_with_snapshots"],
+        )
 
-    new_skill_path = cfg.output_dir / "linkedin-high-engagement-writer" / "SKILL.md"
-    if not new_skill_path.exists():
-        log.error("Cannot validate: %s does not exist. Run synthesis first.", new_skill_path)
-        return 2
+        log.info("Profile step 2: extract profile features (~$0.30)")
+        profile_extract_summary = profile_extractor.extract_profile_features(cfg)
+        log.info("  profile features: %s", profile_extract_summary)
 
-    log.info("Step 4/4: validation (this calls Claude ~%d times, ~$1)", args.validate_n * 3)
-    result = validator.run_validation(
-        cfg,
-        old_skill_path=args.leadmagnet_skill_path,
-        new_skill_path=new_skill_path,
-        n=args.validate_n,
-    )
-    report_path = validator.write_report(result, cfg.output_dir)
-    log.info(
-        "Validation: new=%d old=%d ties=%d (win-rate %.0f%%) -> %s",
-        result.new_wins,
-        result.old_wins,
-        result.ties,
-        result.win_rate * 100,
-        report_path,
-    )
+        log.info("Profile step 3: profile-axis stats merged into stats.json")
+        profile_axis = profile_stats.compute_profile_stats(cfg)
+        profile_stats.merge_into_stats_json(profile_axis, cfg.output_dir)
+        log.info(
+            "  profile axis: n_creators_analyzed=%d",
+            profile_axis.get("n_creators_analyzed", 0),
+        )
+
+        log.info("Profile step 4: synthesize linkedin-profile-optimizer (~$1.30)")
+        profile_skill_path = profile_synthesizer.synthesize(cfg)
+        log.info("Wrote %s.", profile_skill_path)
+
+    if run_validation:
+        new_skill_path = cfg.output_dir / "linkedin-high-engagement-writer" / "SKILL.md"
+        if not new_skill_path.exists():
+            log.error(
+                "Cannot validate: %s does not exist. Run synthesis first.",
+                new_skill_path,
+            )
+            return 2
+
+        log.info("Validation: head-to-head new vs leadmagnet (~$1)")
+        result = validator.run_validation(
+            cfg,
+            old_skill_path=args.leadmagnet_skill_path,
+            new_skill_path=new_skill_path,
+            n=args.validate_n,
+        )
+        report_path = validator.write_report(result, cfg.output_dir)
+        log.info(
+            "  validation: new=%d old=%d ties=%d (win-rate %.0f%%) -> %s",
+            result.new_wins,
+            result.old_wins,
+            result.ties,
+            result.win_rate * 100,
+            report_path,
+        )
     return 0
 
 

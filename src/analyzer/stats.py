@@ -60,12 +60,27 @@ def _quartile(sorted_vals: list[float], q: float) -> float | None:
     return sorted_vals[idx]
 
 
-def _stats_for_subset(parsed: list[tuple[float, dict]]) -> dict:
-    """Compute the categorical/numeric/proof breakdown for a subset of posts.
+def _stats_for_subset(
+    parsed: list[tuple[float, dict]],
+    *,
+    categorical_keys: set[str] | None = None,
+    numeric_keys: set[str] | None = None,
+    boolean_keys: set[str] | None = None,
+) -> dict:
+    """Compute the categorical/numeric/proof breakdown for a subset of items.
 
-    `parsed` is an already-sorted-desc list of (engagement_score, features_dict).
-    Returns the same shape `compute_stats` previously returned at the top level.
+    `parsed` is an already-sorted-desc list of (score, features_dict). The
+    score is engagement_score for posts, growth_rate_per_week for profiles —
+    same math, different key sets.
+
+    Optional key-set kwargs let the profile axis (and any future axis) reuse
+    this aggregation without copy-pasting it. Defaults match the post-feature
+    schema for backward compatibility.
     """
+    cat_keys = categorical_keys if categorical_keys is not None else CATEGORICAL_KEYS
+    num_keys = numeric_keys if numeric_keys is not None else NUMERIC_KEYS
+    bool_keys = boolean_keys if boolean_keys is not None else BOOLEAN_KEYS
+
     if not parsed:
         return {
             "n_posts_analyzed": 0,
@@ -83,7 +98,7 @@ def _stats_for_subset(parsed: list[tuple[float, dict]]) -> dict:
 
     # Categorical features
     categorical: dict[str, dict] = {}
-    for key in CATEGORICAL_KEYS | BOOLEAN_KEYS:
+    for key in cat_keys | bool_keys:
         buckets: dict[str, list[float]] = defaultdict(list)
         for score, feats in parsed:
             v = feats.get(key)
@@ -103,7 +118,7 @@ def _stats_for_subset(parsed: list[tuple[float, dict]]) -> dict:
 
     # Numeric features
     numeric: dict[str, dict] = {}
-    for key in NUMERIC_KEYS:
+    for key in num_keys:
         xs: list[float] = []
         ys: list[float] = []
         top_vals: list[float] = []
