@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { Empty, LinkButton, PageHeader, Panel } from '@/components/ui';
+import { Empty, LinkButton, PageHeader, Panel, Stat } from '@/components/ui';
 import { OUTPUT_DIR } from '@/lib/paths';
 
 export const dynamic = 'force-dynamic';
@@ -14,16 +14,35 @@ function readIf(p: string): string | null {
   }
 }
 
+function parseVerdict(
+  md: string | null,
+): { newWins: number; oldWins: number; ties: number; winRate: number } | null {
+  if (!md) return null;
+  const newWinsMatch = /new skill wins:\s*\*\*(\d+)\*\*/i.exec(md);
+  const oldWinsMatch = /existing skill wins:\s*\*\*(\d+)\*\*/i.exec(md);
+  const tiesMatch = /ties:\s*\*\*(\d+)\*\*/i.exec(md);
+  if (!newWinsMatch || !oldWinsMatch || !tiesMatch) return null;
+  const newWins = Number(newWinsMatch[1]);
+  const oldWins = Number(oldWinsMatch[1]);
+  const ties = Number(tiesMatch[1]);
+  const decided = newWins + oldWins;
+  return { newWins, oldWins, ties, winRate: decided ? newWins / decided : 0 };
+}
+
 export default function SkillPage() {
   const skillPath = path.join(OUTPUT_DIR, 'linkedin-high-engagement-writer', 'SKILL.md');
   const statsPath = path.join(OUTPUT_DIR, 'stats.json');
   const topPath = path.join(OUTPUT_DIR, 'top_posts.md');
   const bottomPath = path.join(OUTPUT_DIR, 'bottom_posts.md');
+  const validationPath = path.join(OUTPUT_DIR, 'validation.md');
 
   const skill = readIf(skillPath);
   const stats = readIf(statsPath);
   const top = readIf(topPath);
   const bottom = readIf(bottomPath);
+  const validation = readIf(validationPath);
+
+  const verdict = parseVerdict(validation);
 
   if (!skill) {
     return (
@@ -43,6 +62,25 @@ export default function SkillPage() {
   return (
     <>
       <PageHeader title="Generated skill" subtitle={skillPath} />
+
+      {validation ? (
+        <Panel title="Validation" subtitle="Head-to-head A/B vs the existing skill" className="mb-4">
+          {verdict ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <Stat label="Win-rate (new)" value={`${Math.round(verdict.winRate * 100)}%`} />
+              <Stat label="New wins" value={String(verdict.newWins)} />
+              <Stat label="Old wins" value={String(verdict.oldWins)} />
+              <Stat label="Ties" value={String(verdict.ties)} />
+            </div>
+          ) : null}
+          <details>
+            <summary className="text-sm text-muted cursor-pointer">show full report</summary>
+            <pre className="mt-3 whitespace-pre-wrap text-xs font-mono p-4 bg-bg rounded border border-border max-h-[60vh] overflow-auto">
+              {validation}
+            </pre>
+          </details>
+        </Panel>
+      ) : null}
 
       <Panel title="SKILL.md" className="mb-4">
         <pre className="whitespace-pre-wrap break-words text-xs font-mono p-4 bg-bg rounded border border-border max-h-[60vh] overflow-auto">
