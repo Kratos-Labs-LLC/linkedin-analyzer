@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Day-31 analysis entrypoint: extractor -> stats -> synthesizer."""
+"""Day-31 analysis entrypoint: extractor -> stats -> synthesizer -> validator."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import storage  # noqa: E402
-from src.analyzer import extractor, stats, synthesizer  # noqa: E402
+from src.analyzer import extractor, stats, synthesizer, validator  # noqa: E402
 from src.config import load_config  # noqa: E402
 
 MIN_POSTS = 800
@@ -61,44 +61,86 @@ def main() -> int:
     )
     parser.add_argument("--skip-extract", action="store_true", help="Skip feature extraction step.")
     parser.add_argument("--skip-synth", action="store_true", help="Skip synthesizer (stats only).")
+    parser.add_argument(
+        "--skip-validate",
+        action="store_true",
+        help="Skip head-to-head validation against the existing skill.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Skip extract/stats/synth; just run the validator against existing output.",
+    )
+    parser.add_argument(
+        "--validate-n",
+        type=int,
+        default=validator.DEFAULT_N_PROMPTS,
+        help="How many prompts to evaluate during validation (default 15).",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
     storage.init_db(cfg.db_path)
 
-    reasons = _check_readiness(cfg)
-    if reasons and not args.force:
-        log.error("Analysis preconditions not met:")
-        for r in reasons:
-            log.error("  - %s", r)
-        log.error("Pass --force to run anyway.")
-        return 2
+    if not args.validate_only:
+        reasons = _check_readiness(cfg)
+        if reasons and not args.force:
+            log.error("Analysis preconditions not met:")
+            for r in reasons:
+                log.error("  - %s", r)
+            log.error("Pass --force to run anyway.")
+            return 2
+        if reasons:
+            log.warning("Forcing run despite: %s", "; ".join(reasons))
 
-    if reasons:
-        log.warning("Forcing run despite: %s", "; ".join(reasons))
+        # Recompute engagement scores in case follower counts changed mid-run.
+        with storage.connect(cfg.db_path) as conn:
+            n = storage.recompute_all_engagement_scores(conn)
+            log.info("Recomputed engagement scores for %d posts.", n)
 
-    # Recompute engagement scores in case follower counts changed mid-run.
-    with storage.connect(cfg.db_path) as conn:
-        n = storage.recompute_all_engagement_scores(conn)
-        log.info("Recomputed engagement scores for %d posts.", n)
+        if not args.skip_extract:
+            log.info("Step 1/4: feature extraction")
+            extractor.extract_features(cfg)
 
-    if not args.skip_extract:
-        log.info("Step 1/3: feature extraction")
-        extractor.extract_features(cfg)
+        log.info("Step 2/4: stats")
+        stats_dict = stats.compute_stats(cfg)
+        stats.write_stats_json(stats_dict, cfg.output_dir)
+        stats.write_top_bottom_markdown(cfg, cfg.output_dir, limit=50)
+        log.info("Wrote stats.json, top_posts.md, bottom_posts.md to %s", cfg.output_dir)
 
-    log.info("Step 2/3: stats")
-    stats_dict = stats.compute_stats(cfg)
-    stats.write_stats_json(stats_dict, cfg.output_dir)
-    stats.write_top_bottom_markdown(cfg, cfg.output_dir, limit=50)
-    log.info("Wrote stats.json, top_posts.md, bottom_posts.md to %s", cfg.output_dir)
+        if args.skip_synth:
+            log.info("Skipping synthesis.")
+            if args.skip_validate:
+                return 0
+        else:
+            log.info("Step 3/4: synthesis")
+            out = synthesizer.synthesize(cfg, args.leadmagnet_skill_path)
+            log.info("Wrote %s. Review, then install to ~/.claude/skills/.", out)
 
-    if args.skip_synth:
-        log.info("Skipping synthesis.")
+    if args.skip_validate:
         return 0
 
-    log.info("Step 3/3: synthesis")
-    out = synthesizer.synthesize(cfg, args.leadmagnet_skill_path)
-    log.info("Wrote %s. Review, then install to ~/.claude/skills/.", out)
+    new_skill_path = cfg.output_dir / "linkedin-high-engagement-writer" / "SKILL.md"
+    if not new_skill_path.exists():
+        log.error("Cannot validate: %s does not exist. Run synthesis first.", new_skill_path)
+        return 2
+
+    log.info("Step 4/4: validation (this calls Claude ~%d times, ~$1)", args.validate_n * 3)
+    result = validator.run_validation(
+        cfg,
+        old_skill_path=args.leadmagnet_skill_path,
+        new_skill_path=new_skill_path,
+        n=args.validate_n,
+    )
+    report_path = validator.write_report(result, cfg.output_dir)
+    log.info(
+        "Validation: new=%d old=%d ties=%d (win-rate %.0f%%) -> %s",
+        result.new_wins,
+        result.old_wins,
+        result.ties,
+        result.win_rate * 100,
+        report_path,
+    )
     return 0
 
 
