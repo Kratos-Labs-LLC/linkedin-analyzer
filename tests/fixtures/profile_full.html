@@ -1,0 +1,50 @@
+<!--
+  Synthetic LinkedIn profile page. Exercises every field the profile parser
+  extracts. All identifiers are fake.
+
+  Expected parse output:
+    follower_count: 12345
+    headline: contains "Synthetic founder"
+    about_text: contains "ship better content"
+    current_role: "Founder"
+    current_company: "Synthetic Labs"
+    location: "London, United Kingdom"
+    has_profile_photo: true
+    has_banner: true
+    featured_count: 3
+-->
+<html>
+<body>
+  <div class="pv-top-card">
+    <img class="pv-top-card__photo" src="/synthetic.jpg" alt="profile photo">
+    <div class="profile-background-image" style="background-image: url(/banner.jpg)"></div>
+    <h1 class="text-heading-xlarge">Synthetic Person</h1>
+    <div class="text-body-medium">Synthetic founder | Helping fake agencies escape the fake retainer trap</div>
+    <span class="text-body-small">London, United Kingdom</span>
+    <span class="t-bold">12,345 followers</span>
+  </div>
+
+  <section id="about">
+    <div class="pv-shared-text-with-see-more">
+      <span>I help agency founders ship better content and productize their delivery. I previously did fake things at fake places.</span>
+    </div>
+  </section>
+
+  <section id="experience">
+    <li>
+      <span>Founder at Synthetic Labs</span>
+      <span>Mar 2023 - Present</span>
+    </li>
+    <li>
+      <span>Director at Old Synthetic Co</span>
+      <span>2018 - 2023</span>
+    </li>
+  </section>
+
+  <section id="featured">
+    <li class="pv-featured-item">Lead magnet 1</li>
+    <li class="pv-featured-item">Podcast 1</li>
+    <li class="pv-featured-item">Press mention</li>
+  </section>
+</body>
+</html>

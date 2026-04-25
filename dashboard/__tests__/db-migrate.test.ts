@@ -46,10 +46,20 @@ vi.mock('@/lib/paths', () => ({
   leadmagnetSkillPath: () => null,
 }));
 
+// Real schema.sql lives at <project root>/db/schema.sql. The mocked REPO_ROOT
+// points at a per-test tmp dir, so we copy schema.sql into <tmp>/db/schema.sql
+// at fixture setup so getDb's `fs.readFileSync(SCHEMA_PATH)` resolves.
+const REAL_SCHEMA = fs.readFileSync(
+  path.resolve(__dirname, '..', '..', 'db', 'schema.sql'),
+  'utf8',
+);
+
 describe('dashboard _migrate', () => {
   beforeEach(() => {
     hoisted.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-mig-'));
     hoisted.dbPath = path.join(hoisted.tmpDir, 'analyzer.db');
+    fs.mkdirSync(path.join(hoisted.tmpDir, 'db'), { recursive: true });
+    fs.writeFileSync(path.join(hoisted.tmpDir, 'db', 'schema.sql'), REAL_SCHEMA);
     vi.resetModules();
   });
 

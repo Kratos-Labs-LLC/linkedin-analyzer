@@ -1,9 +1,23 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { _resetForTesting, take } from '@/lib/rate-limit';
 
-beforeEach(() => _resetForTesting());
-afterEach(() => _resetForTesting());
+let tmpDir: string;
+let stateFile: string;
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-'));
+  stateFile = path.join(tmpDir, 'rate_limit.json');
+  _resetForTesting({ customStatePath: stateFile });
+});
+afterEach(() => {
+  _resetForTesting();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 const KEY = 'test';
 
@@ -105,5 +119,64 @@ describe('rate limit token bucket', () => {
     expect(a.allowed).toBe(true);
     expect(b.allowed).toBe(false); // would be true if double-release leaked
     if (a.allowed) a.release();
+  });
+
+  it('persists token state to disk after a take', () => {
+    const r = take({ key: KEY, capacity: 5, windowMs: 60_000, maxInFlight: 1 });
+    expect(r.allowed).toBe(true);
+    if (r.allowed) r.release();
+
+    const persisted = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    expect(persisted[KEY]).toBeDefined();
+    expect(persisted[KEY].tokens).toBeCloseTo(4, 5);
+  });
+
+  it('hydrates tokens from disk on first call after restart', () => {
+    // Simulate a process restart: clear in-memory cache (test fixture already
+    // did this in beforeEach), then write state file BEFORE first take.
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({
+        [KEY]: { tokens: 0.5, lastRefillAt: 1_000_000, capacity: 5, windowMs: 60_000 },
+      }),
+    );
+
+    // Time hasn't advanced past lastRefillAt much — bucket should still be
+    // <1 token, request denied.
+    const r = take({
+      key: KEY,
+      capacity: 5,
+      windowMs: 60_000,
+      maxInFlight: 1,
+      now: () => 1_000_500, // 0.5s after lastRefillAt → ~0.04 token added
+    });
+    expect(r.allowed).toBe(false);
+  });
+
+  it('disregards persisted state when capacity differs (config change)', () => {
+    // Old state had capacity=3; new code wants capacity=10 → ignore the disk.
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({
+        [KEY]: { tokens: 0, lastRefillAt: 1_000_000, capacity: 3, windowMs: 60_000 },
+      }),
+    );
+
+    const r = take({
+      key: KEY,
+      capacity: 10,
+      windowMs: 60_000,
+      maxInFlight: 1,
+      now: () => 1_000_001,
+    });
+    expect(r.allowed).toBe(true); // fresh bucket with capacity=10
+    if (r.allowed) r.release();
+  });
+
+  it('survives unparseable state file (treats as fresh)', () => {
+    fs.writeFileSync(stateFile, 'not json{{{');
+    const r = take({ key: KEY, capacity: 5, windowMs: 60_000, maxInFlight: 1 });
+    expect(r.allowed).toBe(true);
+    if (r.allowed) r.release();
   });
 });

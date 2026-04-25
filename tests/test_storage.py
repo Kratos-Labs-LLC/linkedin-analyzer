@@ -504,6 +504,96 @@ def test_connect_enables_foreign_keys(db: Path):
     assert fk == 1
 
 
+def test_insert_profile_snapshot_prunes_older_raw_html(db: Path):
+    """Lifecycle: only the latest snapshot per creator keeps raw_html.
+    Older snapshots get NULL after the next insert."""
+    with storage.connect(db) as conn:
+        storage.sync_creators(conn, [creator("https://linkedin.com/in/a", "A")])
+        cid = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/a")
+
+        storage.insert_profile_snapshot(
+            conn, creator_id=cid, follower_count=1000, raw_html="<old1/>",
+            snapshot_at="2026-04-01T00:00:00Z",
+        )
+        storage.insert_profile_snapshot(
+            conn, creator_id=cid, follower_count=1100, raw_html="<old2/>",
+            snapshot_at="2026-04-04T00:00:00Z",
+        )
+        storage.insert_profile_snapshot(
+            conn, creator_id=cid, follower_count=1200, raw_html="<latest/>",
+            snapshot_at="2026-04-07T00:00:00Z",
+        )
+
+        rows = conn.execute(
+            "SELECT snapshot_at, raw_html FROM creator_profiles "
+            "WHERE creator_id = ? ORDER BY snapshot_at",
+            (cid,),
+        ).fetchall()
+
+    assert len(rows) == 3
+    assert rows[0]["raw_html"] is None  # oldest pruned
+    assert rows[1]["raw_html"] is None  # middle pruned
+    assert rows[2]["raw_html"] == "<latest/>"  # only latest survives
+
+
+def test_prune_all_raw_html_one_shot_cleanup(db: Path):
+    """Sanity: a legacy DB with raw_html on multiple snapshots gets pruned
+    to keep only the latest per creator after one prune_all run."""
+    with storage.connect(db) as conn:
+        storage.sync_creators(
+            conn,
+            [
+                creator("https://linkedin.com/in/a", "A"),
+                creator("https://linkedin.com/in/b", "B"),
+            ],
+        )
+        cid_a = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/a")
+        cid_b = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/b")
+        # Bypass insert_profile_snapshot's auto-prune by inserting raw rows.
+        for cid in (cid_a, cid_b):
+            for i, ts in enumerate(
+                ["2026-04-01T00:00:00Z", "2026-04-04T00:00:00Z", "2026-04-07T00:00:00Z"]
+            ):
+                conn.execute(
+                    "INSERT INTO creator_profiles "
+                    "(creator_id, snapshot_at, follower_count, raw_html) "
+                    "VALUES (?, ?, ?, ?)",
+                    (cid, ts, 1000 + i, f"<html-{cid}-{i}/>"),
+                )
+        # Pre-state: 6 rows with raw_html
+        n_before = conn.execute(
+            "SELECT COUNT(*) AS n FROM creator_profiles WHERE raw_html IS NOT NULL"
+        ).fetchone()["n"]
+        assert n_before == 6
+
+        touched = storage.prune_all_raw_html(conn)
+        assert touched == 4  # 2 creators × 2 older snapshots each
+
+        n_after = conn.execute(
+            "SELECT COUNT(*) AS n FROM creator_profiles WHERE raw_html IS NOT NULL"
+        ).fetchone()["n"]
+        assert n_after == 2  # one per creator (the latest)
+
+
+def test_prune_old_raw_html_idempotent(db: Path):
+    with storage.connect(db) as conn:
+        storage.sync_creators(conn, [creator("https://linkedin.com/in/a", "A")])
+        cid = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/a")
+        storage.insert_profile_snapshot(
+            conn, creator_id=cid, follower_count=1000, raw_html="<a/>",
+            snapshot_at="2026-04-01T00:00:00Z",
+        )
+        storage.insert_profile_snapshot(
+            conn, creator_id=cid, follower_count=1100, raw_html="<b/>",
+            snapshot_at="2026-04-02T00:00:00Z",
+        )
+        # Auto-prune already ran on the second insert. A second prune is no-op.
+        a = storage.prune_old_raw_html(conn, cid)
+        b = storage.prune_old_raw_html(conn, cid)
+        assert a == 0  # already pruned by the auto-prune
+        assert b == 0
+
+
 def test_schema_includes_creator_engagement_composite_index(db: Path):
     """R8: composite index speeds 'posts for creator X above engagement Y'
     queries on the dashboard. Regression catch if the index is dropped."""

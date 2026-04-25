@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   PlayCircle,
+  Activity,
 } from 'lucide-react';
 
 import { cn } from '@/lib/cn';
@@ -22,6 +23,7 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
   { href: '/runs', label: 'Runs', icon: History },
   { href: '/analysis', label: 'Analysis', icon: SlidersHorizontal },
   { href: '/skill', label: 'Skill', icon: Sparkles },
+  { href: '/metrics', label: 'Metrics', icon: Activity },
   { href: '/actions', label: 'Actions', icon: PlayCircle },
 ];
 
