@@ -166,3 +166,131 @@ def test_top_bottom_posts_partition(db: Path):
         assert len(bottom) == 2
         assert top[0]["reactions"] == 90
         assert bottom[-1]["reactions"] == 0
+
+
+# --- raw_html column ----------------------------------------------------
+
+
+def test_insert_post_persists_raw_html(db: Path):
+    """Each insert stores the post container's inner_html for later re-extraction."""
+    with storage.connect(db) as conn:
+        storage.sync_creators(conn, [creator("https://linkedin.com/in/a", "A")])
+        cid = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/a")
+        storage.insert_post(
+            conn,
+            post_urn="urn:li:activity:html-1",
+            creator_id=cid,
+            post_url=None,
+            post_text="hello",
+            reactions=10,
+            comments=0,
+            reshares=0,
+            follower_count_at_collection=1_000,
+            post_date=None,
+            raw_html="<div data-urn='urn:li:activity:html-1'>marker</div>",
+        )
+        row = conn.execute("SELECT raw_html FROM posts").fetchone()
+        assert row["raw_html"] is not None
+        assert "marker" in row["raw_html"]
+
+
+def test_insert_post_raw_html_optional(db: Path):
+    """Missing raw_html stores NULL — backwards-compat for older callers."""
+    with storage.connect(db) as conn:
+        storage.sync_creators(conn, [creator("https://linkedin.com/in/a", "A")])
+        cid = storage.get_creator_id_by_url(conn, "https://linkedin.com/in/a")
+        storage.insert_post(
+            conn,
+            post_urn="urn:li:activity:nohtml",
+            creator_id=cid,
+            post_url=None,
+            post_text="hi",
+            reactions=1,
+            comments=0,
+            reshares=0,
+            follower_count_at_collection=1_000,
+            post_date=None,
+        )
+        row = conn.execute("SELECT raw_html FROM posts").fetchone()
+        assert row["raw_html"] is None
+
+
+def test_init_db_migrates_old_schema_to_add_raw_html(tmp_path: Path):
+    """If a pre-migration DB exists (no raw_html column), init_db must add it
+    without losing data."""
+    db_path = tmp_path / "old.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build a posts table that matches the pre-migration shape, with one row.
+    import sqlite3
+
+    legacy_schema = """
+    CREATE TABLE creators (
+      id INTEGER PRIMARY KEY,
+      linkedin_url TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      current_follower_count INTEGER,
+      weight REAL DEFAULT 1.0,
+      last_scraped_at TEXT,
+      active BOOLEAN DEFAULT 1,
+      added_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE posts (
+      id INTEGER PRIMARY KEY,
+      post_urn TEXT UNIQUE NOT NULL,
+      creator_id INTEGER REFERENCES creators(id),
+      post_url TEXT,
+      post_text TEXT NOT NULL,
+      reactions INTEGER DEFAULT 0,
+      comments INTEGER DEFAULT 0,
+      reshares INTEGER DEFAULT 0,
+      follower_count_at_collection INTEGER,
+      engagement_score REAL,
+      post_date TEXT,
+      collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      is_repost_with_commentary BOOLEAN DEFAULT 0
+    );
+    """
+    legacy = sqlite3.connect(str(db_path))
+    legacy.executescript(legacy_schema)
+    legacy.execute(
+        "INSERT INTO creators (linkedin_url, display_name) VALUES (?, ?)",
+        ("https://linkedin.com/in/legacy", "Legacy"),
+    )
+    legacy.execute(
+        "INSERT INTO posts (post_urn, creator_id, post_text) VALUES (?, ?, ?)",
+        ("urn:li:activity:legacy", 1, "old post"),
+    )
+    legacy.commit()
+    legacy.close()
+
+    storage.init_db(db_path)
+
+    with storage.connect(db_path) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(posts)").fetchall()}
+        assert "raw_html" in cols
+        # Existing data preserved
+        row = conn.execute("SELECT post_urn, raw_html FROM posts").fetchone()
+        assert row["post_urn"] == "urn:li:activity:legacy"
+        assert row["raw_html"] is None
+
+
+def test_init_db_migration_is_idempotent(db: Path):
+    """Re-running init_db on an already-migrated DB is a no-op."""
+    storage.init_db(db)  # already called by the fixture; this is the second run
+    with storage.connect(db) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(posts)").fetchall()}
+        # Must not have duplicated columns
+        assert sum(1 for c in cols if c == "raw_html") == 1
+
+
+def test_parse_post_html_populates_raw_html_field():
+    from src.parser import parse_post_html
+
+    html = (
+        '<div data-urn="urn:li:activity:12345" class="feed-shared-update-v2">'
+        '<span class="update-components-text">hello</span></div>'
+    )
+    cand = parse_post_html(html)
+    assert cand is not None
+    assert cand.raw_html == html

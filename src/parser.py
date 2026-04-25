@@ -55,6 +55,7 @@ class PostCandidate:
     repost_commentary_word_count: int
     is_sponsored: bool
     has_text: bool
+    raw_html: str | None = None
 
     @property
     def qualifies_as_original(self) -> bool:
@@ -267,4 +268,5 @@ def parse_post_html(html: str) -> PostCandidate | None:
         repost_commentary_word_count=word_count if ex.is_repost else 0,
         is_sponsored=ex.is_sponsored,
         has_text=bool(text),
+        raw_html=html,
     )
