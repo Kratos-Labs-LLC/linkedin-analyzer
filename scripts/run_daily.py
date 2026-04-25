@@ -15,21 +15,13 @@ sys.path.insert(0, str(REPO_ROOT))
 from src import storage, watchdog  # noqa: E402
 from src.collector import run_daily_collection, run_dry_collection  # noqa: E402
 from src.config import load_config  # noqa: E402
+from src.log_setup import setup_logging as _setup_logging  # noqa: E402
 
 
 def setup_logging(logs_dir: Path) -> None:
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    """Daily-log file plus stdout. Format chosen by JSON_LOGS env var."""
     date = datetime.now(timezone.utc).date().isoformat()
-    logfile = logs_dir / f"{date}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(logfile),
-            logging.StreamHandler(sys.stdout),
-        ],
-        force=True,
-    )
+    _setup_logging(log_file=logs_dir / f"{date}.log")
 
 
 async def main(dry_run: bool) -> int:

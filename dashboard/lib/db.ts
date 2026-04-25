@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 
-import { DB_PATH } from './paths';
+import { DB_PATH, REPO_ROOT } from './paths';
+
+// Single source of truth for the schema lives at db/schema.sql, loaded by
+// both Python and TS at module-init time. Matching the test ensures neither
+// side can drift its CREATE TABLE statements out of sync.
+const SCHEMA_PATH = path.join(REPO_ROOT, 'db', 'schema.sql');
 
 export type CreatorRow = {
   id: number;
@@ -53,84 +58,6 @@ export type RunRow = {
   errors_json: string | null;
 };
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS creators (
-  id INTEGER PRIMARY KEY,
-  linkedin_url TEXT UNIQUE NOT NULL,
-  display_name TEXT,
-  current_follower_count INTEGER,
-  weight REAL DEFAULT 1.0,
-  last_scraped_at TEXT,
-  active BOOLEAN DEFAULT 1,
-  added_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS posts (
-  id INTEGER PRIMARY KEY,
-  post_urn TEXT UNIQUE NOT NULL,
-  creator_id INTEGER REFERENCES creators(id),
-  post_url TEXT,
-  post_text TEXT NOT NULL,
-  reactions INTEGER DEFAULT 0,
-  comments INTEGER DEFAULT 0,
-  reshares INTEGER DEFAULT 0,
-  follower_count_at_collection INTEGER,
-  engagement_score REAL,
-  post_date TEXT,
-  collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  is_repost_with_commentary BOOLEAN DEFAULT 0,
-  raw_html TEXT,
-  growth_7d INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS creator_profiles (
-  id INTEGER PRIMARY KEY,
-  creator_id INTEGER NOT NULL REFERENCES creators(id),
-  snapshot_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  follower_count INTEGER,
-  headline TEXT,
-  about_text TEXT,
-  current_role TEXT,
-  current_company TEXT,
-  location TEXT,
-  has_profile_photo BOOLEAN,
-  has_banner BOOLEAN,
-  featured_count INTEGER,
-  raw_html TEXT
-);
-
-CREATE TABLE IF NOT EXISTS profile_features (
-  creator_id INTEGER PRIMARY KEY REFERENCES creators(id),
-  features_json TEXT NOT NULL,
-  extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  source_snapshot_id INTEGER REFERENCES creator_profiles(id)
-);
-
-CREATE TABLE IF NOT EXISTS post_features (
-  post_id INTEGER PRIMARY KEY REFERENCES posts(id),
-  features_json TEXT NOT NULL,
-  extracted_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-  id INTEGER PRIMARY KEY,
-  run_date TEXT NOT NULL,
-  started_at TEXT,
-  ended_at TEXT,
-  status TEXT,
-  posts_collected INTEGER,
-  creators_scraped INTEGER,
-  errors_json TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_posts_engagement ON posts(engagement_score DESC);
-CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
-CREATE INDEX IF NOT EXISTS idx_posts_creator_engagement
-  ON posts(creator_id, engagement_score DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(run_date);
-CREATE INDEX IF NOT EXISTS idx_cp_creator_time
-  ON creator_profiles(creator_id, snapshot_at DESC);
-`;
 
 // Cache the Database handle on globalThis so Next dev mode's HMR re-uses the
 // open connection across module re-evaluations. Without this, every code
@@ -148,7 +75,7 @@ export function getDb(): Database.Database {
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  db.exec(SCHEMA);
+  db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
   _migrate(db);
   globalThis.__linkedinAnalyzerDb = db;
   return db;

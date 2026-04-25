@@ -1,0 +1,35 @@
+<!--
+  Synthetic LinkedIn post container, structured to match the production DOM
+  shape the parser targets. All identifiers are fake. This fixture is the
+  canary: when LinkedIn rotates class names, the parser's fallback chain
+  may stop matching and these tests will fail before the production scrape
+  silently degrades.
+
+  Expected parse output:
+    post_urn: urn:li:activity:7000000000000000001
+    reactions: 1234
+    comments: 56
+    reshares: 7
+    is_repost: false
+    is_sponsored: false
+    has_text: true (contains "fake post body")
+    post_text: contains "fake post body"
+-->
+<div data-urn="urn:li:activity:7000000000000000001" class="feed-shared-update-v2 feed-shared-update-v2--minimal-padding occludable-update">
+  <div class="feed-shared-actor feed-shared-actor--with-control-menu">
+    <span class="update-components-actor__name">Synthetic Author</span>
+    <span class="update-components-actor__description">Synthetic Title at Synthetic Company</span>
+  </div>
+  <time datetime="2026-04-15T09:30:00Z">2 weeks ago</time>
+  <div class="feed-shared-update-v2__description">
+    <span class="update-components-text break-words">
+      this is the fake post body. it has multiple sentences and exercises the
+      text-capture path. the parser should pick this up as the post_text.
+    </span>
+  </div>
+  <div class="social-details-social-counts">
+    <button aria-label="1,234 reactions">like</button>
+    <button aria-label="56 comments">comment</button>
+    <button aria-label="7 reposts">repost</button>
+  </div>
+</div>

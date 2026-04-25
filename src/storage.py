@@ -10,92 +10,11 @@ from typing import Iterable, Iterator
 
 from src.config import CreatorConfig
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS creators (
-  id INTEGER PRIMARY KEY,
-  linkedin_url TEXT UNIQUE NOT NULL,
-  display_name TEXT,
-  current_follower_count INTEGER,
-  weight REAL DEFAULT 1.0,
-  last_scraped_at TEXT,
-  active BOOLEAN DEFAULT 1,
-  added_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
+# Canonical schema lives at db/schema.sql at the repo root and is loaded by
+# both this module and dashboard/lib/db.ts. Single source of truth — no drift.
+_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 
-CREATE TABLE IF NOT EXISTS posts (
-  id INTEGER PRIMARY KEY,
-  post_urn TEXT UNIQUE NOT NULL,
-  creator_id INTEGER REFERENCES creators(id),
-  post_url TEXT,
-  post_text TEXT NOT NULL,
-  reactions INTEGER DEFAULT 0,
-  comments INTEGER DEFAULT 0,
-  reshares INTEGER DEFAULT 0,
-  follower_count_at_collection INTEGER,
-  engagement_score REAL,
-  post_date TEXT,
-  collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  is_repost_with_commentary BOOLEAN DEFAULT 0,
-  raw_html TEXT
-);
-
-CREATE TABLE IF NOT EXISTS post_features (
-  post_id INTEGER PRIMARY KEY REFERENCES posts(id),
-  features_json TEXT NOT NULL,
-  extracted_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-  id INTEGER PRIMARY KEY,
-  run_date TEXT NOT NULL,
-  started_at TEXT,
-  ended_at TEXT,
-  status TEXT,
-  posts_collected INTEGER,
-  creators_scraped INTEGER,
-  errors_json TEXT
-);
-
--- Profile snapshots over time — one row per visit per creator. The collector
--- already lands on the profile page each scrape; we persist what's there so
--- we can compute follower-growth attribution without changing scrape volume.
-CREATE TABLE IF NOT EXISTS creator_profiles (
-  id INTEGER PRIMARY KEY,
-  creator_id INTEGER NOT NULL REFERENCES creators(id),
-  snapshot_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  follower_count INTEGER,
-  headline TEXT,
-  about_text TEXT,
-  current_role TEXT,
-  current_company TEXT,
-  location TEXT,
-  has_profile_photo BOOLEAN,
-  has_banner BOOLEAN,
-  featured_count INTEGER,
-  raw_html TEXT
-);
-
--- One Claude-extracted feature row per active creator (latest snapshot).
--- History is in creator_profiles; rich features here.
-CREATE TABLE IF NOT EXISTS profile_features (
-  creator_id INTEGER PRIMARY KEY REFERENCES creators(id),
-  features_json TEXT NOT NULL,
-  extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  source_snapshot_id INTEGER REFERENCES creator_profiles(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_posts_engagement ON posts(engagement_score DESC);
-CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
--- Composite index covers the common "posts for creator X above engagement Y"
--- query pattern in dashboard /posts and /creators/[id]. SQLite picks one
--- index per query, so without this composite the creator filter forces a
--- table scan.
-CREATE INDEX IF NOT EXISTS idx_posts_creator_engagement
-  ON posts(creator_id, engagement_score DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(run_date);
-CREATE INDEX IF NOT EXISTS idx_cp_creator_time
-  ON creator_profiles(creator_id, snapshot_at DESC);
-"""
+SCHEMA = _SCHEMA_PATH.read_text()
 
 
 def init_db(path: Path) -> None:
@@ -363,7 +282,49 @@ def insert_profile_snapshot(
             snapshot_at,
         ),
     )
-    return int(cur.lastrowid or 0)
+    new_id = int(cur.lastrowid or 0)
+    # Lifecycle: keep raw_html only on the latest snapshot per creator.
+    # Earlier snapshots get NULLed out — we paid the storage cost once
+    # (~500KB-1MB each), and re-extraction can run against the latest
+    # snapshot's raw_html when needed. Keeps the DB bounded over time.
+    if raw_html is not None:
+        prune_old_raw_html(conn, creator_id)
+    return new_id
+
+
+def prune_old_raw_html(conn: sqlite3.Connection, creator_id: int) -> int:
+    """NULL out raw_html on every creator_profiles row for `creator_id`
+    except the latest by snapshot_at. Returns the number of rows touched.
+
+    Idempotent — re-running on a creator who's already been pruned is a no-op.
+    """
+    cur = conn.execute(
+        """
+        UPDATE creator_profiles
+        SET raw_html = NULL
+        WHERE creator_id = ?
+          AND raw_html IS NOT NULL
+          AND id != (
+            SELECT id FROM creator_profiles
+            WHERE creator_id = ?
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+          )
+        """,
+        (creator_id, creator_id),
+    )
+    return cur.rowcount
+
+
+def prune_all_raw_html(conn: sqlite3.Connection) -> int:
+    """Run prune_old_raw_html for every creator. Useful as a one-shot
+    cleanup on legacy DBs that accumulated raw_html before the lifecycle
+    policy landed."""
+    rows = conn.execute("SELECT id FROM creators").fetchall()
+    total = 0
+    for r in rows:
+        total += prune_old_raw_html(conn, r["id"])
+    return total
 
 
 def latest_profile_snapshot(

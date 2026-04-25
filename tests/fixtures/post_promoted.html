@@ -1,0 +1,17 @@
+<!--
+  Synthetic promoted post — exercises is_sponsored detection. Either the
+  Promoted text or the .promoted class is sufficient to flag.
+
+  Expected parse output:
+    post_urn: urn:li:activity:7000000000000000003
+    is_sponsored: true
+-->
+<div data-urn="urn:li:activity:7000000000000000003" class="feed-shared-update-v2 promoted">
+  <div class="update-components-actor">
+    <span>Synthetic Sponsor</span>
+    <span>Promoted</span>
+  </div>
+  <div class="update-components-text">
+    <span>buy our thing now, sponsored content body here</span>
+  </div>
+</div>

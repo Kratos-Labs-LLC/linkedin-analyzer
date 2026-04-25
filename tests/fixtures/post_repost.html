@@ -1,0 +1,21 @@
+<!--
+  Synthetic repost — exercises is_repost detection. The parser should
+  see the "reposted" class and flag is_repost=true. Without commentary
+  meeting the >=50 word threshold (none here), passes_inclusion_rules
+  should reject this candidate.
+
+  Expected parse output:
+    post_urn: urn:li:activity:7000000000000000002
+    is_repost: true
+    qualifies_as_original: false (no commentary >= 50 words)
+-->
+<div data-urn="urn:li:activity:7000000000000000002" class="feed-shared-update-v2 reposted">
+  <div class="update-components-actor reposted-by">
+    <span>Synthetic Reposter reposted this</span>
+  </div>
+  <time datetime="2026-04-10T08:00:00Z">3 weeks ago</time>
+  <div class="update-components-text">
+    <span>original content goes here, no commentary added by the reposter</span>
+  </div>
+  <button aria-label="42 reactions">like</button>
+</div>

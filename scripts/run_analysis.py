@@ -15,6 +15,7 @@ from src import storage  # noqa: E402
 from src.analyzer import (  # noqa: E402
     extractor,
     growth,
+    metrics,
     profile_audit,
     profile_extractor,
     profile_stats,
@@ -24,6 +25,7 @@ from src.analyzer import (  # noqa: E402
     validator,
 )
 from src.config import load_config  # noqa: E402
+from src.log_setup import setup_logging  # noqa: E402
 
 MIN_POSTS = 800
 MIN_CREATORS_WITH_20 = 15
@@ -58,7 +60,7 @@ def _check_readiness(cfg) -> list[str]:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging()
     log = logging.getLogger("run_analysis")
 
     parser = argparse.ArgumentParser()
@@ -206,6 +208,11 @@ def main() -> int:
             result.win_rate * 100,
             report_path,
         )
+
+    # Write a single per-run metrics snapshot to output/metrics.json — read
+    # by the dashboard's /metrics page and useful for ad-hoc inspection.
+    metrics_path = metrics.write_metrics(cfg)
+    log.info("Wrote %s.", metrics_path)
     return 0
 
 
