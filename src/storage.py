@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS profile_features (
 
 CREATE INDEX IF NOT EXISTS idx_posts_engagement ON posts(engagement_score DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
+-- Composite index covers the common "posts for creator X above engagement Y"
+-- query pattern in dashboard /posts and /creators/[id]. SQLite picks one
+-- index per query, so without this composite the creator filter forces a
+-- table scan.
+CREATE INDEX IF NOT EXISTS idx_posts_creator_engagement
+  ON posts(creator_id, engagement_score DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(run_date);
 CREATE INDEX IF NOT EXISTS idx_cp_creator_time
   ON creator_profiles(creator_id, snapshot_at DESC);
@@ -158,6 +164,11 @@ def connect(path: Path | str) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL = readers don't block writers and vice versa. Critical when the
+    # daily collector writes mid-analysis: without WAL, dashboard reads
+    # serialize behind the analyzer's bulk UPDATEs. Set repo-wide once;
+    # SQLite remembers the journal mode in the DB header.
+    conn.execute("PRAGMA journal_mode = WAL")
     try:
         yield conn
         conn.commit()

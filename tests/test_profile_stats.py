@@ -121,6 +121,24 @@ def test_compute_profile_stats_skips_creators_without_features(tmp_path: Path):
     assert axis["creators_without_features"] == 1
 
 
+def test_compute_profile_stats_excludes_inactive_creators(tmp_path: Path):
+    """B3: a deactivated creator's profile_features row must not contaminate
+    the analysis. Reproduce the bug by setting active=0 after seeding."""
+    cfg = _cfg(tmp_path)
+    _seed_two_creators_with_diverging_growth(cfg)
+
+    # Now deactivate creator A — their stale features should drop out.
+    with storage.connect(cfg.db_path) as conn:
+        conn.execute(
+            "UPDATE creators SET active = 0 WHERE linkedin_url = ?",
+            ("https://linkedin.com/in/a",),
+        )
+
+    axis = profile_stats.compute_profile_stats(cfg)
+    # B alone is left, so n_creators_analyzed is 1.
+    assert axis["n_creators_analyzed"] == 1
+
+
 def test_compute_profile_stats_skips_creators_without_growth_rate(tmp_path: Path):
     cfg = _cfg(tmp_path)
     storage.init_db(cfg.db_path)

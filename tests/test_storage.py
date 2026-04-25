@@ -486,3 +486,30 @@ def test_list_profile_snapshots_orders_oldest_first(db: Path):
 def test_latest_profile_snapshot_none_for_unknown_creator(db: Path):
     with storage.connect(db) as conn:
         assert storage.latest_profile_snapshot(conn, 99_999) is None
+
+
+def test_connect_enables_wal_mode(db: Path):
+    """B1: WAL mode must be on so dashboard reads don't block on collector
+    writes mid-analysis. Setting it once on a connection persists in the DB
+    header — every subsequent open sees it."""
+    with storage.connect(db) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal", f"expected WAL, got {mode}"
+
+
+def test_connect_enables_foreign_keys(db: Path):
+    """Sanity: regression catch if someone removes the foreign_keys pragma."""
+    with storage.connect(db) as conn:
+        fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    assert fk == 1
+
+
+def test_schema_includes_creator_engagement_composite_index(db: Path):
+    """R8: composite index speeds 'posts for creator X above engagement Y'
+    queries on the dashboard. Regression catch if the index is dropped."""
+    with storage.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='posts'"
+        ).fetchall()
+    names = {r[0] for r in rows}
+    assert "idx_posts_creator_engagement" in names
