@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { DraftPanel } from '@/components/draft-panel';
 import { Empty, LinkButton, PageHeader, Panel, Stat } from '@/components/ui';
-import { OUTPUT_DIR } from '@/lib/paths';
+import { NEW_SKILL_PATH, OUTPUT_DIR, leadmagnetSkillPath } from '@/lib/paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,9 +60,20 @@ export default function SkillPage() {
     );
   }
 
+  const oldSkillPath = leadmagnetSkillPath();
+  const draftReady = !!oldSkillPath && fs.existsSync(oldSkillPath) && fs.existsSync(NEW_SKILL_PATH);
+
   return (
     <>
       <PageHeader title="Generated skill" subtitle={skillPath} />
+
+      <Panel
+        title="Draft a post"
+        subtitle="Side-by-side compare what the new vs existing skill would write for any topic."
+        className="mb-4"
+      >
+        <DraftPanel ready={draftReady} />
+      </Panel>
 
       {validation ? (
         <Panel title="Validation" subtitle="Head-to-head A/B vs the existing skill" className="mb-4">
