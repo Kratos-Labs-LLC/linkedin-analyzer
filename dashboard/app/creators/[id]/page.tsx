@@ -16,6 +16,7 @@ import {
   getCreator,
   latestProfileSnapshot,
   listProfileSnapshots,
+  parseSqliteTimestamp,
   postsForCreatorByGrowth,
   type ProfileSnapshotRow,
 } from '@/lib/db';
@@ -172,7 +173,7 @@ function FollowerSparkline({
   const points = snapshots
     .filter((s) => s.follower_count !== null)
     .map((s) => ({
-      t: new Date(s.snapshot_at.replace(/Z$/, 'Z')).getTime(),
+      t: parseSqliteTimestamp(s.snapshot_at),
       f: s.follower_count as number,
     }))
     .filter((p) => Number.isFinite(p.t));

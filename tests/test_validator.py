@@ -132,6 +132,44 @@ def test_stats_summary_handles_garbage(tmp_path: Path):
     assert "could not be parsed" in validator._stats_summary(p)
 
 
+def test_stats_summary_includes_profile_axis_when_present(tmp_path: Path):
+    """F7: judge needs the profile-pull profile too, not just engagement."""
+    payload = {
+        "n_posts_analyzed": 100,
+        "categorical_features": {},
+        "numeric_features": {},
+        "profile_axis": {
+            "n_creators_analyzed": 12,
+            "score_field": "growth_rate_per_week",
+            "categorical_features": {
+                "headline_style": {
+                    "benefit-led": {"rank": 1, "n": 5, "mean_engagement": 80},
+                    "role-only": {"rank": 2, "n": 4, "mean_engagement": 5},
+                }
+            },
+        },
+    }
+    p = tmp_path / "stats.json"
+    p.write_text(json.dumps(payload))
+    parsed = json.loads(validator._stats_summary(p))
+    assert "profile_axis" in parsed
+    assert parsed["profile_axis"]["n_creators_analyzed"] == 12
+    assert parsed["profile_axis"]["top_per_categorical"]["headline_style"] == "benefit-led"
+
+
+def test_stats_summary_omits_profile_axis_when_absent(tmp_path: Path):
+    """No profile_axis in stats.json → key not present in summary (lighter prompt)."""
+    payload = {
+        "n_posts_analyzed": 100,
+        "categorical_features": {},
+        "numeric_features": {},
+    }
+    p = tmp_path / "stats.json"
+    p.write_text(json.dumps(payload))
+    parsed = json.loads(validator._stats_summary(p))
+    assert "profile_axis" not in parsed
+
+
 # --- sampling --------------------------------------------------------------
 
 

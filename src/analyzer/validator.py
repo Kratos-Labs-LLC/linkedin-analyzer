@@ -24,6 +24,7 @@ from pathlib import Path
 from anthropic import Anthropic
 
 from src import storage
+from src.analyzer._retry import with_retry
 from src.config import AppConfig
 
 log = logging.getLogger(__name__)
@@ -161,19 +162,22 @@ def _prompt_from_post(*, topic: str, hook: str, text: str) -> str:
 
 def _draft(client: Anthropic, skill_md: str, prompt: str) -> str:
     """Use the skill content as the system prompt; ask for one post."""
-    resp = client.messages.create(
-        model=DRAFT_MODEL,
-        max_tokens=DRAFT_MAX_TOKENS,
-        temperature=DRAFT_TEMPERATURE,
-        system=[{
-            "type": "text",
-            "text": skill_md,
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{
-            "role": "user",
-            "content": prompt + "\n\nReturn only the post text. No preamble, no markdown fences.",
-        }],
+    resp = with_retry(
+        lambda: client.messages.create(
+            model=DRAFT_MODEL,
+            max_tokens=DRAFT_MAX_TOKENS,
+            temperature=DRAFT_TEMPERATURE,
+            system=[{
+                "type": "text",
+                "text": skill_md,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{
+                "role": "user",
+                "content": prompt + "\n\nReturn only the post text. No preamble, no markdown fences.",
+            }],
+        ),
+        description="validator draft",
     )
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
@@ -202,16 +206,19 @@ def _judge(
         f"<post_b>\n{draft_b}\n</post_b>\n\n"
         "Return JSON only."
     )
-    resp = client.messages.create(
-        model=JUDGE_MODEL,
-        max_tokens=JUDGE_MAX_TOKENS,
-        temperature=0.0,
-        system=[{
-            "type": "text",
-            "text": JUDGE_SYSTEM,
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{"role": "user", "content": user_msg}],
+    resp = with_retry(
+        lambda: client.messages.create(
+            model=JUDGE_MODEL,
+            max_tokens=JUDGE_MAX_TOKENS,
+            temperature=0.0,
+            system=[{
+                "type": "text",
+                "text": JUDGE_SYSTEM,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_msg}],
+        ),
+        description="validator judge",
     )
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
     return _parse_judge_json(raw)
@@ -277,6 +284,27 @@ def _stats_summary(stats_path: Path) -> str:
     }
     summary["proof_elements_frequency"] = data.get("proof_elements_frequency", {})
     summary["n_posts_analyzed"] = data.get("n_posts_analyzed")
+
+    # Include the profile-pull axis when present so the judge can evaluate
+    # which post is more likely to drive profile clicks, not just engagement.
+    profile_axis = data.get("profile_axis") or {}
+    if profile_axis:
+        pa_cat = profile_axis.get("categorical_features") or {}
+        pa_top: dict[str, str] = {}
+        for feature, buckets in pa_cat.items():
+            if not isinstance(buckets, dict):
+                continue
+            ranked = sorted(
+                ((k, v) for k, v in buckets.items() if isinstance(v, dict)),
+                key=lambda kv: kv[1].get("rank", 999),
+            )
+            if ranked:
+                pa_top[feature] = ranked[0][0]
+        summary["profile_axis"] = {
+            "n_creators_analyzed": profile_axis.get("n_creators_analyzed"),
+            "score_field": profile_axis.get("score_field"),
+            "top_per_categorical": pa_top,
+        }
     return json.dumps(summary, indent=2)
 
 

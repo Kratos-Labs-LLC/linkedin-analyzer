@@ -406,6 +406,27 @@ export function postsForCreatorByGrowth(creatorId: number, limit = 30): PostWith
 }
 
 /**
+ * Normalize SQLite/ISO timestamp strings into a deterministic JS Date.
+ *
+ * SQLite's `CURRENT_TIMESTAMP` default emits 'YYYY-MM-DD HH:MM:SS' (UTC, no
+ * timezone marker). `new Date()` on that string is implementation-defined
+ * per ECMA-262 — V8 has historically interpreted it as local time, Safari as
+ * UTC. Python's `datetime.fromisoformat` (which growth.py uses) handles it
+ * deterministically. We normalize the string so JS matches.
+ *
+ * Accepts either:
+ *   '2026-04-01 00:00:00'         (SQLite default)
+ *   '2026-04-01T00:00:00'         (Python isoformat, naive)
+ *   '2026-04-01T00:00:00Z'        (UTC marker)
+ *   '2026-04-01T00:00:00+00:00'   (offset)
+ */
+export function parseSqliteTimestamp(s: string): number {
+  let iso = s.includes('T') ? s : s.replace(' ', 'T');
+  if (!/(?:Z|[+-]\d\d:?\d\d)$/.test(iso)) iso += 'Z';
+  return new Date(iso).getTime();
+}
+
+/**
  * Per-creator follower-growth slope (followers per week) over the snapshot
  * series. Returns null when the creator has fewer than 2 snapshots or all
  * timestamps collapse. Mirrors src/analyzer/growth.py:compute_growth_rate.
@@ -414,7 +435,7 @@ export function computeGrowthRatePerWeek(snapshots: ProfileSnapshotRow[]): numbe
   const points = snapshots
     .filter((s) => s.follower_count !== null)
     .map((s) => ({
-      t: new Date(s.snapshot_at.replace(/Z$/, 'Z')).getTime() / 1000,
+      t: parseSqliteTimestamp(s.snapshot_at) / 1000,
       f: s.follower_count as number,
     }))
     .filter((p) => Number.isFinite(p.t));

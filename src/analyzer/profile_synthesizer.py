@@ -35,6 +35,11 @@ SKILL_NAME = "linkedin-profile-optimizer"
 SAMPLE_TOP_CREATOR_PROFILES = 6
 SAMPLE_BOTTOM_CREATOR_PROFILES = 4
 
+# Minimum creators with both growth-rate AND profile features before it's
+# worth burning ~$1.30 of Opus on a profile-optimizer skill. Below this, the
+# synth would be hallucinating from too-small a sample.
+MIN_CREATORS_FOR_SYNTH = 5
+
 
 # --- Prompt blocks -----------------------------------------------------------
 
@@ -230,7 +235,15 @@ def _render_top_bottom_profiles(cfg: AppConfig) -> tuple[str, str]:
 # --- Public API --------------------------------------------------------------
 
 
-def synthesize(cfg: AppConfig) -> Path:
+def synthesize(cfg: AppConfig) -> Path | None:
+    """Author linkedin-profile-optimizer/SKILL.md.
+
+    Returns None — and burns no Anthropic spend — when the dataset is too
+    small (`profile_axis.n_creators_analyzed < MIN_CREATORS_FOR_SYNTH`).
+    The collector and feature extractor will accumulate more data on the
+    next run; the user can re-invoke `--profile-only` once the threshold
+    is met.
+    """
     if not cfg.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not set; cannot run profile synthesis.")
 
@@ -245,6 +258,16 @@ def synthesize(cfg: AppConfig) -> Path:
         raise RuntimeError(
             "stats.json has no profile_axis field. Run compute_profile_stats then merge_into_stats_json."
         )
+
+    n_creators = int(profile_axis.get("n_creators_analyzed") or 0)
+    if n_creators < MIN_CREATORS_FOR_SYNTH:
+        log.warning(
+            "Profile synth skipped: only %d creators have features+growth-rate "
+            "(need >= %d). Re-run after more snapshots accumulate.",
+            n_creators,
+            MIN_CREATORS_FOR_SYNTH,
+        )
+        return None
 
     top_md, bottom_md = _render_top_bottom_profiles(cfg)
     static = _static_inputs(

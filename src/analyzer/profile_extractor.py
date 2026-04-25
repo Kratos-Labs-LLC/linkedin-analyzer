@@ -17,6 +17,7 @@ from typing import Any
 from anthropic import Anthropic
 
 from src import storage
+from src.analyzer._retry import with_retry
 from src.config import AppConfig
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ Extract these features and return as a flat JSON object:
 Return only the JSON object."""
 
 
-def _build_user_message(*, profile_row: Any, top_posts: list[Any]) -> str:
+def build_user_message(*, profile_row: Any, top_posts: list[Any]) -> str:
     headline = profile_row["headline"] or "(no headline parsed)"
     about = profile_row["about_text"] or "(no about text parsed)"
     role = profile_row["current_role"] or "(unknown)"
@@ -91,7 +92,7 @@ def _build_user_message(*, profile_row: Any, top_posts: list[Any]) -> str:
     )
 
 
-def _parse_and_validate(raw: str) -> dict | None:
+def parse_and_validate(raw: str) -> dict | None:
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
@@ -117,30 +118,33 @@ def _call_claude(
     top_posts: list[Any],
     temperature: float = 0.2,
 ) -> dict | None:
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        temperature=temperature,
-        system=[
-            {
-                "type": "text",
-                "text": INSTRUCTION_BLOCK,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": _build_user_message(
-                    profile_row=profile_row, top_posts=top_posts
-                ),
-            }
-        ],
+    resp = with_retry(
+        lambda: client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            temperature=temperature,
+            system=[
+                {
+                    "type": "text",
+                    "text": INSTRUCTION_BLOCK,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": build_user_message(
+                        profile_row=profile_row, top_posts=top_posts
+                    ),
+                }
+            ],
+        ),
+        description="profile feature extraction",
     )
     text = "".join(
         block.text for block in resp.content if getattr(block, "type", "") == "text"
     )
-    return _parse_and_validate(text)
+    return parse_and_validate(text)
 
 
 def extract_profile_features(cfg: AppConfig) -> dict:

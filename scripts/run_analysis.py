@@ -169,7 +169,10 @@ def main() -> int:
     if run_profile_pipeline:
         log.info("Profile step 4: synthesize linkedin-profile-optimizer (~$1.30)")
         profile_skill_path = profile_synthesizer.synthesize(cfg)
-        log.info("Wrote %s.", profile_skill_path)
+        if profile_skill_path is not None:
+            log.info("Wrote %s.", profile_skill_path)
+        else:
+            log.info("Profile skill synth skipped (insufficient data).")
 
         # Step 5 (gated): personal audit. Only fires when MY_PROFILE_URL is
         # set. Returns None silently otherwise — no error.
