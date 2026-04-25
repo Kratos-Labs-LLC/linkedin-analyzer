@@ -34,6 +34,10 @@ NUMERIC_KEYS = {
 }
 BOOLEAN_KEYS = {"uses_list", "uses_emojis"}
 
+# Topics with fewer than this many posts are not stratified — too noisy to
+# warrant a per-topic table in the synthesizer.
+MIN_POSTS_PER_TOPIC = 8
+
 
 def _pearson(xs: list[float], ys: list[float]) -> float | None:
     n = len(xs)
@@ -56,29 +60,22 @@ def _quartile(sorted_vals: list[float], q: float) -> float | None:
     return sorted_vals[idx]
 
 
-def compute_stats(cfg: AppConfig) -> dict:
-    with storage.connect(cfg.db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT p.id, p.engagement_score, pf.features_json
-            FROM posts p JOIN post_features pf ON pf.post_id = p.id
-            WHERE p.engagement_score IS NOT NULL
-            """
-        ).fetchall()
+def _stats_for_subset(parsed: list[tuple[float, dict]]) -> dict:
+    """Compute the categorical/numeric/proof breakdown for a subset of posts.
 
-    if not rows:
-        log.warning("No rows with features + engagement scores.")
-        return {"n_posts_analyzed": 0}
+    `parsed` is an already-sorted-desc list of (engagement_score, features_dict).
+    Returns the same shape `compute_stats` previously returned at the top level.
+    """
+    if not parsed:
+        return {
+            "n_posts_analyzed": 0,
+            "top_quartile_n": 0,
+            "bottom_quartile_n": 0,
+            "categorical_features": {},
+            "numeric_features": {},
+            "proof_elements_frequency": {"top_quartile": {}, "bottom_quartile": {}},
+        }
 
-    parsed: list[tuple[float, dict]] = []
-    for r in rows:
-        try:
-            feats = json.loads(r["features_json"])
-        except json.JSONDecodeError:
-            continue
-        parsed.append((r["engagement_score"], feats))
-
-    parsed.sort(key=lambda t: t[0], reverse=True)
     n = len(parsed)
     cutoff = max(1, int(n * 0.5))
     top_q = parsed[:cutoff]
@@ -158,6 +155,63 @@ def compute_stats(cfg: AppConfig) -> dict:
             "top_quartile": dict(proof_top),
             "bottom_quartile": dict(proof_bot),
         },
+    }
+
+
+def compute_stats(cfg: AppConfig, min_posts_per_topic: int = MIN_POSTS_PER_TOPIC) -> dict:
+    with storage.connect(cfg.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.engagement_score, pf.features_json
+            FROM posts p JOIN post_features pf ON pf.post_id = p.id
+            WHERE p.engagement_score IS NOT NULL
+            """
+        ).fetchall()
+
+    if not rows:
+        log.warning("No rows with features + engagement scores.")
+        return {"n_posts_analyzed": 0}
+
+    parsed: list[tuple[float, dict]] = []
+    for r in rows:
+        try:
+            feats = json.loads(r["features_json"])
+        except json.JSONDecodeError:
+            continue
+        parsed.append((r["engagement_score"], feats))
+
+    parsed.sort(key=lambda t: t[0], reverse=True)
+
+    pooled = _stats_for_subset(parsed)
+
+    # Per-topic stratification — pooled findings can be misleading when hooks
+    # that win for `ai` lose for `personal_brand`. Synthesizer uses these to
+    # author per-topic hook tables.
+    by_topic_groups: dict[str, list[tuple[float, dict]]] = defaultdict(list)
+    for score, feats in parsed:
+        topic = feats.get("topic_category") or "other"
+        by_topic_groups[str(topic)].append((score, feats))
+
+    by_topic: dict[str, dict] = {}
+    skipped_topics: dict[str, int] = {}
+    for topic, group in by_topic_groups.items():
+        if len(group) < min_posts_per_topic:
+            skipped_topics[topic] = len(group)
+            continue
+        # Already sorted: each group preserves the parent sort order.
+        by_topic[topic] = _stats_for_subset(group)
+
+    return {
+        **pooled,
+        "by_topic": by_topic,
+        "topics_skipped_min_n": skipped_topics,
+        "min_posts_per_topic": min_posts_per_topic,
+        "note": (
+            "by_topic[<topic>].top_quartile_mean / bottom_quartile_mean are "
+            "computed within each topic's own subset, not against the global "
+            "engagement distribution. Treat per-topic numbers as relative "
+            "rankings inside that topic, not as absolute thresholds."
+        ),
     }
 
 
