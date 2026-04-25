@@ -132,13 +132,9 @@ def main() -> int:
         stats.write_top_bottom_markdown(cfg, cfg.output_dir, limit=50)
         log.info("Wrote stats.json, top_posts.md, bottom_posts.md to %s", cfg.output_dir)
 
-        if args.skip_synth:
-            log.info("Skipping post synthesis.")
-        else:
-            log.info("Post step 3: synthesis")
-            out = synthesizer.synthesize(cfg, args.leadmagnet_skill_path)
-            log.info("Wrote %s.", out)
-
+    # Profile pipeline runs BEFORE post synthesis when both are enabled, so the
+    # post synth can read the growth-axis findings (top_growth_posts.md +
+    # profile_axis under stats.json) into its prompt.
     if run_profile_pipeline:
         log.info("Profile step 1: backfill posts.growth_7d from snapshots")
         growth_summary = growth.recompute_post_growth(cfg)
@@ -148,6 +144,7 @@ def main() -> int:
             growth_summary["skipped"],
             growth_summary["creators_with_snapshots"],
         )
+        stats.write_top_growth_markdown(cfg, cfg.output_dir, limit=30)
 
         log.info("Profile step 2: extract profile features (~$0.30)")
         profile_extract_summary = profile_extractor.extract_profile_features(cfg)
@@ -161,6 +158,14 @@ def main() -> int:
             profile_axis.get("n_creators_analyzed", 0),
         )
 
+    if run_post_pipeline and not args.skip_synth:
+        log.info("Post step 3: synthesis (now profile-pull-aware)")
+        out = synthesizer.synthesize(cfg, args.leadmagnet_skill_path)
+        log.info("Wrote %s.", out)
+    elif run_post_pipeline:
+        log.info("Skipping post synthesis.")
+
+    if run_profile_pipeline:
         log.info("Profile step 4: synthesize linkedin-profile-optimizer (~$1.30)")
         profile_skill_path = profile_synthesizer.synthesize(cfg)
         log.info("Wrote %s.", profile_skill_path)

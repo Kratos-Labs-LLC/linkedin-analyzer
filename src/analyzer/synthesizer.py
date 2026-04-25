@@ -41,9 +41,17 @@ def _static_inputs(
     stats_json: str,
     top_posts_md: str,
     bottom_posts_md: str,
+    top_growth_posts_md: str,
     leadmagnet_skill: str,
 ) -> str:
-    """The bulk of the prompt — large, identical across draft + revise calls."""
+    """The bulk of the prompt — large, identical across draft + revise calls.
+
+    `stats_json` may include a `profile_axis` field with creator-level
+    growth-rate stats. `top_growth_posts_md` is a sample of posts ranked by
+    7-day follower delta — the proxy for posts that pulled readers to the
+    profile. Both feed the new "Patterns that pull readers to the profile"
+    skill section.
+    """
     return f"""You are authoring a Claude skill called `linkedin-high-engagement-writer`, based on empirical analysis of LinkedIn posts from 25-30 creators in the AI / agency / B2B space.
 
 <statistical_findings>
@@ -57,6 +65,15 @@ def _static_inputs(
 <bottom_performing_posts>
 {bottom_posts_md}
 </bottom_performing_posts>
+
+<posts_that_pulled_readers_to_profile>
+These posts produced the largest 7-day follower deltas for their authors —
+the cleanest available proxy for "this post made readers click through to
+the profile and follow." If empty, the system did not yet have enough
+profile snapshots to compute the metric.
+
+{top_growth_posts_md}
+</posts_that_pulled_readers_to_profile>
 
 <existing_related_skill>
 {leadmagnet_skill}
@@ -81,11 +98,12 @@ Produce a complete SKILL.md file with:
      * IMPORTANT: the `by_topic` field in statistical_findings shows that a hook ranking #1 pooled may not rank #1 within a specific topic. Where the data supports it, surface topic-specific overrides (e.g. "for `ai` posts, contrarian hooks beat bold_claim").
    - "Structural patterns" — paragraph style, length sweet spots, line break density, all grounded in numeric_features.top_quartile_mean vs bottom_quartile_mean.
    - "CTA patterns" — which CTAs correlate with top-quartile engagement. Cite the per-topic numbers when they diverge from pooled.
+   - "Patterns that pull readers to the profile" — analyze <posts_that_pulled_readers_to_profile> and the `profile_axis` block in <statistical_findings>. Identify what the high-pull posts share (hook style, ending shape, presence of named protagonists, link to profile-claim alignment via `profile_axis.numeric_features.post_to_profile_match_score`). Cite specific creators and follower-delta numbers. If the input is empty (system not yet collecting growth data), say so explicitly and skip the section's data points — DO NOT make up numbers.
    - "What doesn't work" — 3-5 concrete anti-patterns from the bottom quartile, with examples.
    - "The Dugg voice filter" — how to translate the patterns into his specific voice. Reference the voice profile.
-   - "Worked examples" — 3 full post templates with placeholders, each based on a pattern from the data. Pick examples spanning at least 2 different topic_category values.
+   - "Worked examples" — 3 full post templates with placeholders, each based on a pattern from the data. Pick examples spanning at least 2 different topic_category values. At least one example must demonstrate the profile-pull pattern.
    - "Pre-post checklist" — 5-8 yes/no questions the writer should ask before publishing.
-   - "When NOT to use this skill" — defer to leadmagnet-post-writer when the post is promoting a downloadable resource with a comment-keyword CTA.
+   - "When NOT to use this skill" — defer to leadmagnet-post-writer when the post is promoting a downloadable resource with a comment-keyword CTA. Defer to linkedin-profile-optimizer when the request is to rewrite the profile rather than author a single post.
 
 3. Clear delineation vs existing skill: this one is for general thought-leadership / brand-building posts, not lead magnets.
 
@@ -106,12 +124,13 @@ CHECKLIST:
 1. Frontmatter present? `name` exact (`linkedin-high-engagement-writer`)? `description` rich and triggering, mentioning the right intent (thought-leadership / brand-building, not lead magnets)?
 2. Every empirical claim cites the data — bucket name + rank or n, or the @creator + engagement score for example posts. No vague "research shows" hand-waving.
 3. The `by_topic` data is actually used. If you ranked hooks pooled and there are topic-specific differences in `by_topic`, the skill must call them out explicitly. If you didn't use `by_topic`, you missed the most useful signal.
-4. Dugg voice applied throughout: lowercase, short sentences, "->" arrows, first-person only, no defensive language.
-5. All 9 body sections present and in order (Intro, Hooks, Structural, CTAs, What doesn't work, Voice filter, Worked examples, Checklist, When NOT to use).
-6. Worked examples have real placeholders ({like_this}), not just generic post outlines. They span at least 2 topic_category values.
-7. Pre-post checklist has 5-8 yes/no questions.
-8. Total length under 800 lines.
-9. "When NOT to use this skill" clearly delineates from leadmagnet-post-writer.
+4. The "Patterns that pull readers to the profile" section is present, references the actual high-pull posts (with creator + follower-delta numbers) and the profile_axis findings, and ties patterns back to the profile-post alignment score. If the input was empty, the section says so and does not invent numbers.
+5. Dugg voice applied throughout: lowercase, short sentences, "->" arrows, first-person only, no defensive language.
+6. All 10 body sections present and in order (Intro, Hooks, Structural, CTAs, Profile-pull, What doesn't work, Voice filter, Worked examples, Checklist, When NOT to use).
+7. Worked examples have real placeholders ({like_this}), not just generic post outlines. They span at least 2 topic_category values, and at least one example demonstrates the profile-pull pattern.
+8. Pre-post checklist has 5-8 yes/no questions.
+9. Total length under 800 lines.
+10. "When NOT to use this skill" delineates BOTH leadmagnet-post-writer AND linkedin-profile-optimizer (defer to the latter for profile-rewrite requests).
 
 OUTPUT:
 - First, a brief <critique> block listing every checklist item you violated or under-delivered on, with one-line fixes.
@@ -227,11 +246,21 @@ def synthesize(cfg: AppConfig, leadmagnet_skill_path: Path) -> Path:
     top_md = (cfg.output_dir / "top_posts.md").read_text()
     bottom_md = (cfg.output_dir / "bottom_posts.md").read_text()
     leadmagnet = leadmagnet_skill_path.read_text()
+    growth_path = cfg.output_dir / "top_growth_posts.md"
+    top_growth_md = (
+        growth_path.read_text()
+        if growth_path.exists()
+        else (
+            "# Top posts by 7-day follower growth\n\n"
+            "_Not generated yet — this run does not include the growth axis._\n"
+        )
+    )
 
     static = _static_inputs(
         stats_json=stats_json,
         top_posts_md=top_md,
         bottom_posts_md=bottom_md,
+        top_growth_posts_md=top_growth_md,
         leadmagnet_skill=leadmagnet,
     )
 
