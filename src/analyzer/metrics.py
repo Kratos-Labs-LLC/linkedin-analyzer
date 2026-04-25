@@ -81,6 +81,7 @@ def compute_metrics(cfg: AppConfig) -> dict:
         "raw_html_in_profiles": raw_html_bytes_profiles,
     }
     summary["outputs"] = _output_status(cfg.output_dir)
+    summary["intelligence"] = _intelligence_status(cfg.output_dir)
     summary["recent_runs"] = recent_runs
     return summary
 
@@ -106,6 +107,54 @@ def _output_status(output_dir: Path) -> dict:
         else:
             out[name] = {"present": False}
     return out
+
+
+def _intelligence_status(output_dir: Path) -> dict:
+    """Per-creator intelligence brief inventory.
+
+    Each successful synth writes <slug>.md + <slug>.pack.json under
+    output/intelligence/. We surface the count and aggregate sizes here
+    so the dashboard's /metrics page can flag drift (e.g. half the
+    creators missing briefs after a partial run)."""
+    intel_dir = output_dir / "intelligence"
+    if not intel_dir.exists():
+        return {
+            "n_creators_with_doc": 0,
+            "total_md_bytes": 0,
+            "total_pack_bytes": 0,
+            "n_stub_docs": 0,
+            "last_intelligence_run_at": None,
+        }
+    md_files = list(intel_dir.glob("*.md"))
+    pack_files = list(intel_dir.glob("*.pack.json"))
+    md_bytes = sum(p.stat().st_size for p in md_files)
+    pack_bytes = sum(p.stat().st_size for p in pack_files)
+
+    # Stub docs are the synth's failure mode — surface the count so an
+    # operator notices when the model regressed against the sanity check.
+    n_stub = 0
+    for p in md_files:
+        try:
+            head = p.read_text()[:200]
+        except OSError:
+            continue
+        if "auto-stub" in head:
+            n_stub += 1
+
+    last_mtime = max((p.stat().st_mtime for p in md_files), default=None)
+    last_iso = (
+        datetime.fromtimestamp(last_mtime, tz=timezone.utc).isoformat()
+        if last_mtime is not None
+        else None
+    )
+
+    return {
+        "n_creators_with_doc": len(md_files),
+        "total_md_bytes": md_bytes,
+        "total_pack_bytes": pack_bytes,
+        "n_stub_docs": n_stub,
+        "last_intelligence_run_at": last_iso,
+    }
 
 
 def write_metrics(cfg: AppConfig) -> Path:

@@ -220,15 +220,25 @@ def main() -> int:
 
     # On --intelligence-only, run the prerequisite computations the
     # intelligence pack depends on, but only when their inputs are stale
-    # or missing. This keeps the flag fast on warm DBs and correct on cold.
+    # or missing. Two prereqs, checked independently:
+    #   - posts.growth_7d (from growth.recompute_post_growth) — feeds the
+    #     "Why followers grow" section. Cheap, no LLM call.
+    #   - profile_features (from profile_extractor) — feeds the profile
+    #     coherence section + the cohort baseline. Sonnet calls, ~$0.30.
+    # Each runs only when its own output is empty, so warm DBs stay fast.
     if args.intelligence_only:
         with storage.connect(cfg.db_path) as conn:
             n_features = conn.execute(
                 "SELECT COUNT(*) AS n FROM profile_features"
             ).fetchone()["n"]
-        if n_features == 0:
-            log.info("intelligence-only prereq: backfill posts.growth_7d and profile features")
+            n_growth = conn.execute(
+                "SELECT COUNT(*) AS n FROM posts WHERE growth_7d IS NOT NULL"
+            ).fetchone()["n"]
+        if n_growth == 0:
+            log.info("intelligence-only prereq: backfill posts.growth_7d")
             growth.recompute_post_growth(cfg)
+        if n_features == 0:
+            log.info("intelligence-only prereq: extract profile features (~$0.30)")
             profile_extractor.extract_profile_features(cfg)
 
     if run_intelligence:

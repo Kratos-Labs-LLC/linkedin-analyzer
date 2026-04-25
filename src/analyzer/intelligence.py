@@ -143,7 +143,7 @@ def build_intelligence_pack(
     growth_rate = growth_mod.compute_growth_rate(snaps_normalized)
 
     profile_features_row = conn.execute(
-        "SELECT features_json, extracted_at FROM profile_features WHERE creator_id = ?",
+        "SELECT features_json FROM profile_features WHERE creator_id = ?",
         (creator_id,),
     ).fetchone()
     profile_features = (
