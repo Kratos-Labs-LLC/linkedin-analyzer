@@ -108,6 +108,33 @@ def test_write_stats_and_markdown(tmp_path: Path):
     assert "Bottom posts" in bot.read_text()
 
 
+def test_write_top_growth_markdown_with_data(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    _seed_posts_with_features(cfg.db_path, n=5)
+    # Set growth_7d on posts so the writer has something to render.
+    with storage.connect(cfg.db_path) as conn:
+        for i, val in enumerate([10, 50, 200, 100, 25]):
+            conn.execute(
+                "UPDATE posts SET growth_7d = ? WHERE post_urn = ?",
+                (val, f"urn:li:activity:{i}"),
+            )
+
+    path = stats.write_top_growth_markdown(cfg, cfg.output_dir, limit=10)
+    body = path.read_text()
+    assert "Top posts by 7-day follower growth" in body
+    # Highest growth (200) should appear before lowest (10)
+    assert body.index("+200") < body.index("+10")
+
+
+def test_write_top_growth_markdown_empty_input(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    _seed_posts_with_features(cfg.db_path, n=3)
+    # No growth_7d set on any post.
+    path = stats.write_top_growth_markdown(cfg, cfg.output_dir)
+    body = path.read_text()
+    assert "No posts with growth_7d" in body
+
+
 def _seed_two_topics(db_path: Path, per_topic: int = 10) -> None:
     """Seed equal numbers of posts in `ai` and `personal_brand`. The `ai`
     topic prefers `bold_claim` hooks; `personal_brand` prefers `question`.

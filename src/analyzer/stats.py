@@ -285,3 +285,58 @@ def write_top_bottom_markdown(cfg: AppConfig, output_dir: Path, limit: int = 50)
     top_path.write_text(render(top, "Top posts by normalized engagement"))
     bot_path.write_text(render(bottom, "Bottom posts by normalized engagement"))
     return top_path, bot_path
+
+
+def write_top_growth_markdown(
+    cfg: AppConfig, output_dir: Path, *, limit: int = 30
+) -> Path:
+    """Top posts by growth_7d (follower-pull proxy). Used by the post
+    synthesizer's 'patterns that pull readers to the profile' section.
+
+    Returns a path even if no posts qualify — the file just contains a
+    note. The synthesizer can detect emptiness and skip the section.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with storage.connect(cfg.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.*, c.display_name AS creator_name, c.linkedin_url AS creator_url
+            FROM posts p JOIN creators c ON c.id = p.creator_id
+            WHERE p.growth_7d IS NOT NULL
+            ORDER BY p.growth_7d DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    path = output_dir / "top_growth_posts.md"
+    if not rows:
+        path.write_text(
+            "# Top posts by 7-day follower growth\n\n"
+            "_No posts with growth_7d yet — needs at least 2 profile snapshots "
+            "per creator and posts with parseable post_date._\n"
+        )
+        return path
+
+    out = ["# Top posts by 7-day follower growth", ""]
+    for r in rows:
+        score_str = (
+            f"{r['engagement_score']:.4f}"
+            if r["engagement_score"] is not None
+            else "—"
+        )
+        out.append(
+            f"## {r['creator_name']} — +{r['growth_7d']} followers in 7d "
+            f"(engagement {score_str})"
+        )
+        out.append(
+            f"reactions={r['reactions']} comments={r['comments']} "
+            f"reshares={r['reshares']} followers={r['follower_count_at_collection']}"
+        )
+        out.append("")
+        out.append(r["post_text"])
+        out.append("")
+        out.append("---")
+        out.append("")
+    path.write_text("\n".join(out))
+    return path

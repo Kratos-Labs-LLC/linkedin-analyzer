@@ -56,13 +56,48 @@ def test_static_inputs_includes_all_sections():
         stats_json='{"n":1}',
         top_posts_md="TOP",
         bottom_posts_md="BOTTOM",
+        top_growth_posts_md="GROWTH",
         leadmagnet_skill="LEAD",
     )
     assert "<statistical_findings>" in s
     assert "TOP" in s
     assert "BOTTOM" in s
+    assert "GROWTH" in s
+    assert "<posts_that_pulled_readers_to_profile>" in s
     assert "LEAD" in s
     assert "dugg_voice_profile" in s
+
+
+def test_synthesize_falls_back_when_top_growth_file_missing(tmp_path: Path):
+    """If top_growth_posts.md hasn't been written yet (profile pipeline
+    skipped), synthesize() supplies a 'not generated yet' placeholder
+    rather than raising."""
+    cfg = _cfg(tmp_path)
+    leadmagnet = tmp_path / "leadmagnet.md"
+    leadmagnet.write_text("LEAD")
+
+    fake = _FakeAnthropic()
+    with patch.object(synthesizer, "Anthropic", lambda **kw: fake):
+        synthesizer.synthesize(cfg, leadmagnet)
+
+    static = fake.calls[0]["system"][0]["text"]
+    assert "Not generated yet" in static or "not yet" in static.lower()
+
+
+def test_synthesize_reads_top_growth_file_when_present(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    leadmagnet = tmp_path / "leadmagnet.md"
+    leadmagnet.write_text("LEAD")
+    (cfg.output_dir / "top_growth_posts.md").write_text(
+        "# Top growth\n\n## Alice — +50 followers\n\nbody\n"
+    )
+
+    fake = _FakeAnthropic()
+    with patch.object(synthesizer, "Anthropic", lambda **kw: fake):
+        synthesizer.synthesize(cfg, leadmagnet)
+
+    static = fake.calls[0]["system"][0]["text"]
+    assert "+50 followers" in static
 
 
 # --- end-to-end with mocked Anthropic -------------------------------------
